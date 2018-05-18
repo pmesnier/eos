@@ -23,7 +23,7 @@
   <td id="projectlogo"><img alt="Logo" src="eos-logo.png"/></td>
   <td id="projectalign" style="padding-left: 0.5em;">
    <div id="projectname">EOS.IO
-   &#160;<span id="projectnumber">DAWN1.0</span>
+   &#160;<span id="projectnumber">DAWN 3.0</span>
    </div>
   </td>
  </tr>
@@ -61,149 +61,145 @@ $(function() {
 
 <div class="header">
   <div class="summary">
-<a href="#define-members">Macros</a> &#124;
-<a href="#typedef-members">Typedefs</a> &#124;
 <a href="#func-members">Functions</a>  </div>
   <div class="headertitle">
-<div class="title">Transaction C API<div class="ingroups"><a class="el" href="group__contractdev.html">How To Write Contracts</a> &raquo; <a class="el" href="group__transactionapi.html">Transaction API</a></div></div>  </div>
+<div class="title">Transaction C API<div class="ingroups"><a class="el" href="group__contractdev.html">Smart Contract API Reference</a> &raquo; <a class="el" href="group__transactionapi.html">transaction API</a></div></div>  </div>
 </div><!--header-->
 <div class="contents">
 
 <p>Define API for sending transactions.  
 <a href="#details">More...</a></p>
 <table class="memberdecls">
-<tr class="heading"><td colspan="2"><h2 class="groupheader"><a name="define-members"></a>
-Macros</h2></td></tr>
-<tr class="memitem:ga58df052e13ad2a3d54a2b1c99a2a8925"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="group__transactioncapi.html#ga58df052e13ad2a3d54a2b1c99a2a8925">InvalidTransactionHandle</a>&#160;&#160;&#160;(0xFFFFFFFFUL)</td></tr>
-<tr class="separator:ga58df052e13ad2a3d54a2b1c99a2a8925"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:ga4b337c3f5a641ee82e84d209a8bba0d7"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="group__transactioncapi.html#ga4b337c3f5a641ee82e84d209a8bba0d7">InvalidMessageHandle</a>&#160;&#160;&#160;(0xFFFFFFFFUL)</td></tr>
-<tr class="separator:ga4b337c3f5a641ee82e84d209a8bba0d7"><td class="memSeparator" colspan="2">&#160;</td></tr>
-</table><table class="memberdecls">
-<tr class="heading"><td colspan="2"><h2 class="groupheader"><a name="typedef-members"></a>
-Typedefs</h2></td></tr>
-<tr class="memitem:ga7a095ea0165891d5ee1dbd8ee40e32cb"><td class="memItemLeft" align="right" valign="top">typedef <a class="el" href="group__types.html#ga06896e8c53f721507066c079052171f8">uint32_t</a>&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="group__transactioncapi.html#ga7a095ea0165891d5ee1dbd8ee40e32cb">TransactionHandle</a></td></tr>
-<tr class="separator:ga7a095ea0165891d5ee1dbd8ee40e32cb"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:gaa42fca851fc0bcfd9dffc229c9552ce5"><td class="memItemLeft" align="right" valign="top">typedef <a class="el" href="group__types.html#ga06896e8c53f721507066c079052171f8">uint32_t</a>&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="group__transactioncapi.html#gaa42fca851fc0bcfd9dffc229c9552ce5">MessageHandle</a></td></tr>
-<tr class="separator:gaa42fca851fc0bcfd9dffc229c9552ce5"><td class="memSeparator" colspan="2">&#160;</td></tr>
-</table><table class="memberdecls">
 <tr class="heading"><td colspan="2"><h2 class="groupheader"><a name="func-members"></a>
 Functions</h2></td></tr>
-<tr class="memitem:ga180dc33e735f9631ed9a800d7b0a511e"><td class="memItemLeft" align="right" valign="top"><a class="el" href="group__transactioncapi.html#ga7a095ea0165891d5ee1dbd8ee40e32cb">TransactionHandle</a>&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="group__transactioncapi.html#ga180dc33e735f9631ed9a800d7b0a511e">transactionCreate</a> ()</td></tr>
-<tr class="memdesc:ga180dc33e735f9631ed9a800d7b0a511e"><td class="mdescLeft">&#160;</td><td class="mdescRight">create a pending transaction  <a href="#ga180dc33e735f9631ed9a800d7b0a511e">More...</a><br /></td></tr>
-<tr class="separator:ga180dc33e735f9631ed9a800d7b0a511e"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:ga347cc9c284bc25ed1d67b596e2320cdc"><td class="memItemLeft" align="right" valign="top">void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="group__transactioncapi.html#ga347cc9c284bc25ed1d67b596e2320cdc">transactionRequireScope</a> (<a class="el" href="group__transactioncapi.html#ga7a095ea0165891d5ee1dbd8ee40e32cb">TransactionHandle</a> trx, <a class="el" href="group__types.html#gad67b43dc23285b01176f4c181c59fc23">AccountName</a> scope, int readOnly=0)</td></tr>
-<tr class="memdesc:ga347cc9c284bc25ed1d67b596e2320cdc"><td class="mdescLeft">&#160;</td><td class="mdescRight">require a scope to process a pending transaction  <a href="#ga347cc9c284bc25ed1d67b596e2320cdc">More...</a><br /></td></tr>
-<tr class="separator:ga347cc9c284bc25ed1d67b596e2320cdc"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:ga1290a226d7828410020ed2954ffa5fa5"><td class="memItemLeft" align="right" valign="top">void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="group__transactioncapi.html#ga1290a226d7828410020ed2954ffa5fa5">transactionAddMessage</a> (<a class="el" href="group__transactioncapi.html#ga7a095ea0165891d5ee1dbd8ee40e32cb">TransactionHandle</a> trx, <a class="el" href="group__transactioncapi.html#gaa42fca851fc0bcfd9dffc229c9552ce5">MessageHandle</a> msg)</td></tr>
-<tr class="memdesc:ga1290a226d7828410020ed2954ffa5fa5"><td class="mdescLeft">&#160;</td><td class="mdescRight">finalize the pending message and add it to the transaction  <a href="#ga1290a226d7828410020ed2954ffa5fa5">More...</a><br /></td></tr>
-<tr class="separator:ga1290a226d7828410020ed2954ffa5fa5"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:ga01eab43648b29422885d4d59a2864aaf"><td class="memItemLeft" align="right" valign="top">void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="group__transactioncapi.html#ga01eab43648b29422885d4d59a2864aaf">transactionSend</a> (<a class="el" href="group__transactioncapi.html#ga7a095ea0165891d5ee1dbd8ee40e32cb">TransactionHandle</a> trx)</td></tr>
-<tr class="memdesc:ga01eab43648b29422885d4d59a2864aaf"><td class="mdescLeft">&#160;</td><td class="mdescRight">send a pending transaction  <a href="#ga01eab43648b29422885d4d59a2864aaf">More...</a><br /></td></tr>
-<tr class="separator:ga01eab43648b29422885d4d59a2864aaf"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:ga37162c1f843ae69d0134be29b1cde61f"><td class="memItemLeft" align="right" valign="top">void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="group__transactioncapi.html#ga37162c1f843ae69d0134be29b1cde61f">transactionDrop</a> (<a class="el" href="group__transactioncapi.html#ga7a095ea0165891d5ee1dbd8ee40e32cb">TransactionHandle</a> trx)</td></tr>
-<tr class="memdesc:ga37162c1f843ae69d0134be29b1cde61f"><td class="mdescLeft">&#160;</td><td class="mdescRight">drop a pending transaction  <a href="#ga37162c1f843ae69d0134be29b1cde61f">More...</a><br /></td></tr>
-<tr class="separator:ga37162c1f843ae69d0134be29b1cde61f"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:ga6940a3e31486bef36409f857e0ed7c72"><td class="memItemLeft" align="right" valign="top"><a class="el" href="group__transactioncapi.html#gaa42fca851fc0bcfd9dffc229c9552ce5">MessageHandle</a>&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="group__transactioncapi.html#ga6940a3e31486bef36409f857e0ed7c72">messageCreate</a> (<a class="el" href="group__types.html#gad67b43dc23285b01176f4c181c59fc23">AccountName</a> code, <a class="el" href="group__types.html#ga4c11ea58b1daa61a364225a757a05cd2">FuncName</a> type, void const *data, int size)</td></tr>
-<tr class="memdesc:ga6940a3e31486bef36409f857e0ed7c72"><td class="mdescLeft">&#160;</td><td class="mdescRight">create a pending message  <a href="#ga6940a3e31486bef36409f857e0ed7c72">More...</a><br /></td></tr>
-<tr class="separator:ga6940a3e31486bef36409f857e0ed7c72"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:gabf3f53f695c30abe4bd48f9b3341a016"><td class="memItemLeft" align="right" valign="top">void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="group__transactioncapi.html#gabf3f53f695c30abe4bd48f9b3341a016">messageRequirePermission</a> (<a class="el" href="group__transactioncapi.html#gaa42fca851fc0bcfd9dffc229c9552ce5">MessageHandle</a> msg, <a class="el" href="group__types.html#gad67b43dc23285b01176f4c181c59fc23">AccountName</a> account, <a class="el" href="group__types.html#ga4bd93be9c597a8d7b6a1a3504ca63e83">PermissionName</a> permission)</td></tr>
-<tr class="memdesc:gabf3f53f695c30abe4bd48f9b3341a016"><td class="mdescLeft">&#160;</td><td class="mdescRight">require a permission for the pending message  <a href="#gabf3f53f695c30abe4bd48f9b3341a016">More...</a><br /></td></tr>
-<tr class="separator:gabf3f53f695c30abe4bd48f9b3341a016"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:ga1f9346e3ef3fae10cf5fee5b9a0270ca"><td class="memItemLeft" align="right" valign="top">void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="group__transactioncapi.html#ga1f9346e3ef3fae10cf5fee5b9a0270ca">messageSend</a> (<a class="el" href="group__transactioncapi.html#gaa42fca851fc0bcfd9dffc229c9552ce5">MessageHandle</a> msg)</td></tr>
-<tr class="memdesc:ga1f9346e3ef3fae10cf5fee5b9a0270ca"><td class="mdescLeft">&#160;</td><td class="mdescRight">send a pending message as an inline message  <a href="#ga1f9346e3ef3fae10cf5fee5b9a0270ca">More...</a><br /></td></tr>
-<tr class="separator:ga1f9346e3ef3fae10cf5fee5b9a0270ca"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:ga77f1412808c199633b41bf2f20e3cb45"><td class="memItemLeft" align="right" valign="top">void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="group__transactioncapi.html#ga77f1412808c199633b41bf2f20e3cb45">messageDrop</a> (<a class="el" href="group__transactioncapi.html#gaa42fca851fc0bcfd9dffc229c9552ce5">MessageHandle</a> msg)</td></tr>
-<tr class="memdesc:ga77f1412808c199633b41bf2f20e3cb45"><td class="mdescLeft">&#160;</td><td class="mdescRight">discard a pending message  <a href="#ga77f1412808c199633b41bf2f20e3cb45">More...</a><br /></td></tr>
-<tr class="separator:ga77f1412808c199633b41bf2f20e3cb45"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:gaa7c68af746c8bd721d7c0817d6904a76"><td class="memItemLeft" align="right" valign="top">void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="group__transactioncapi.html#gaa7c68af746c8bd721d7c0817d6904a76">send_deferred</a> (const <a class="el" href="test__exchange_8cpp.html#a2d00695da4b0795588770b839f9f280e">uint128_t</a> &amp;sender_id, <a class="el" href="group__types.html#ga3b44deb4b3b8d6ebab339d1263692117">account_name</a> payer, const char *serialized_transaction, <a class="el" href="musl_2upstream_2include_2bits_2stddef_8h.html#a7c94ea6f8948649f8d181ae55911eeaf">size_t</a> size)</td></tr>
+<tr class="separator:gaa7c68af746c8bd721d7c0817d6904a76"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:ga040f3e33d271531da96e0f5244d1a365"><td class="memItemLeft" align="right" valign="top">void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="group__transactioncapi.html#ga040f3e33d271531da96e0f5244d1a365">cancel_deferred</a> (const <a class="el" href="test__exchange_8cpp.html#a2d00695da4b0795588770b839f9f280e">uint128_t</a> &amp;sender_id)</td></tr>
+<tr class="separator:ga040f3e33d271531da96e0f5244d1a365"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:ga73fa4253ae0aec55399c26b740223bc6"><td class="memItemLeft" align="right" valign="top"><a class="el" href="musl_2upstream_2include_2bits_2stddef_8h.html#a7c94ea6f8948649f8d181ae55911eeaf">size_t</a>&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="group__transactioncapi.html#ga73fa4253ae0aec55399c26b740223bc6">read_transaction</a> (char *buffer, <a class="el" href="musl_2upstream_2include_2bits_2stddef_8h.html#a7c94ea6f8948649f8d181ae55911eeaf">size_t</a> size)</td></tr>
+<tr class="separator:ga73fa4253ae0aec55399c26b740223bc6"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:gadfcd2e00f00461eac891ee8433508609"><td class="memItemLeft" align="right" valign="top"><a class="el" href="musl_2upstream_2include_2bits_2stddef_8h.html#a7c94ea6f8948649f8d181ae55911eeaf">size_t</a>&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="group__transactioncapi.html#gadfcd2e00f00461eac891ee8433508609">transaction_size</a> ()</td></tr>
+<tr class="separator:gadfcd2e00f00461eac891ee8433508609"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:gac0b858a766ca73c6415bdb799d6ef45a"><td class="memItemLeft" align="right" valign="top">int&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="group__transactioncapi.html#gac0b858a766ca73c6415bdb799d6ef45a">tapos_block_num</a> ()</td></tr>
+<tr class="separator:gac0b858a766ca73c6415bdb799d6ef45a"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:gaef5458ccfe8ca5d6b273e35d04c56371"><td class="memItemLeft" align="right" valign="top">int&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="group__transactioncapi.html#gaef5458ccfe8ca5d6b273e35d04c56371">tapos_block_prefix</a> ()</td></tr>
+<tr class="separator:gaef5458ccfe8ca5d6b273e35d04c56371"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:ga284f37e545cbb7f847f3ab86f50feb1d"><td class="memItemLeft" align="right" valign="top"><a class="el" href="group__types.html#ga1d2f3c0b7d3e40dcd34ee51b80f9da25">time</a>&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="group__transactioncapi.html#ga284f37e545cbb7f847f3ab86f50feb1d">expiration</a> ()</td></tr>
+<tr class="separator:ga284f37e545cbb7f847f3ab86f50feb1d"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:gaf1fe78f3caf24010302e5cac1edad61d"><td class="memItemLeft" align="right" valign="top">int&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="group__transactioncapi.html#gaf1fe78f3caf24010302e5cac1edad61d">get_action</a> (<a class="el" href="musl_2upstream_2include_2bits_2stdint_8h.html#a06896e8c53f721507066c079052171f8">uint32_t</a> type, <a class="el" href="musl_2upstream_2include_2bits_2stdint_8h.html#a06896e8c53f721507066c079052171f8">uint32_t</a> <a class="el" href="index_8c.html#a1d3748ca570dcb09a2fb28e8015107dd">index</a>, char *buff, <a class="el" href="musl_2upstream_2include_2bits_2stddef_8h.html#a7c94ea6f8948649f8d181ae55911eeaf">size_t</a> size)</td></tr>
+<tr class="separator:gaf1fe78f3caf24010302e5cac1edad61d"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:gad0f4f1bd76077b3ee4289aadfb84c2b2"><td class="memItemLeft" align="right" valign="top">int&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="group__transactioncapi.html#gad0f4f1bd76077b3ee4289aadfb84c2b2">get_context_free_data</a> (<a class="el" href="musl_2upstream_2include_2bits_2stdint_8h.html#a06896e8c53f721507066c079052171f8">uint32_t</a> <a class="el" href="index_8c.html#a1d3748ca570dcb09a2fb28e8015107dd">index</a>, char *buff, <a class="el" href="musl_2upstream_2include_2bits_2stddef_8h.html#a7c94ea6f8948649f8d181ae55911eeaf">size_t</a> size)</td></tr>
+<tr class="separator:gad0f4f1bd76077b3ee4289aadfb84c2b2"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:ga4eb270c6316a15e6f579b4b448bc8a74"><td class="memItemLeft" align="right" valign="top">void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="group__transactioncapi.html#ga4eb270c6316a15e6f579b4b448bc8a74">check_auth</a> (const char *serialized_transaction, <a class="el" href="musl_2upstream_2include_2bits_2stddef_8h.html#a7c94ea6f8948649f8d181ae55911eeaf">size_t</a> size, const char *permissions, <a class="el" href="musl_2upstream_2include_2bits_2stddef_8h.html#a7c94ea6f8948649f8d181ae55911eeaf">size_t</a> psize)</td></tr>
+<tr class="separator:ga4eb270c6316a15e6f579b4b448bc8a74"><td class="memSeparator" colspan="2">&#160;</td></tr>
 </table>
 <a name="details" id="details"></a><h2 class="groupheader">Detailed Description</h2>
-<h2 class="groupheader">Macro Definition Documentation</h2>
-<a id="ga4b337c3f5a641ee82e84d209a8bba0d7"></a>
-<h2 class="memtitle"><span class="permalink"><a href="#ga4b337c3f5a641ee82e84d209a8bba0d7">&#9670;&nbsp;</a></span>InvalidMessageHandle</h2>
-
-<div class="memitem">
-<div class="memproto">
-      <table class="memname">
-        <tr>
-          <td class="memname">#define InvalidMessageHandle&#160;&#160;&#160;(0xFFFFFFFFUL)</td>
-        </tr>
-      </table>
-</div><div class="memdoc">
-
-</div>
-</div>
-<a id="ga58df052e13ad2a3d54a2b1c99a2a8925"></a>
-<h2 class="memtitle"><span class="permalink"><a href="#ga58df052e13ad2a3d54a2b1c99a2a8925">&#9670;&nbsp;</a></span>InvalidTransactionHandle</h2>
-
-<div class="memitem">
-<div class="memproto">
-      <table class="memname">
-        <tr>
-          <td class="memname">#define InvalidTransactionHandle&#160;&#160;&#160;(0xFFFFFFFFUL)</td>
-        </tr>
-      </table>
-</div><div class="memdoc">
-
-</div>
-</div>
-<h2 class="groupheader">Typedef Documentation</h2>
-<a id="gaa42fca851fc0bcfd9dffc229c9552ce5"></a>
-<h2 class="memtitle"><span class="permalink"><a href="#gaa42fca851fc0bcfd9dffc229c9552ce5">&#9670;&nbsp;</a></span>MessageHandle</h2>
-
-<div class="memitem">
-<div class="memproto">
-      <table class="memname">
-        <tr>
-          <td class="memname">typedef <a class="el" href="group__types.html#ga06896e8c53f721507066c079052171f8">uint32_t</a> <a class="el" href="group__transactioncapi.html#gaa42fca851fc0bcfd9dffc229c9552ce5">MessageHandle</a></td>
-        </tr>
-      </table>
-</div><div class="memdoc">
-
-</div>
-</div>
-<a id="ga7a095ea0165891d5ee1dbd8ee40e32cb"></a>
-<h2 class="memtitle"><span class="permalink"><a href="#ga7a095ea0165891d5ee1dbd8ee40e32cb">&#9670;&nbsp;</a></span>TransactionHandle</h2>
-
-<div class="memitem">
-<div class="memproto">
-      <table class="memname">
-        <tr>
-          <td class="memname">typedef <a class="el" href="group__types.html#ga06896e8c53f721507066c079052171f8">uint32_t</a> <a class="el" href="group__transactioncapi.html#ga7a095ea0165891d5ee1dbd8ee40e32cb">TransactionHandle</a></td>
-        </tr>
-      </table>
-</div><div class="memdoc">
-
-</div>
-</div>
 <h2 class="groupheader">Function Documentation</h2>
-<a id="ga6940a3e31486bef36409f857e0ed7c72"></a>
-<h2 class="memtitle"><span class="permalink"><a href="#ga6940a3e31486bef36409f857e0ed7c72">&#9670;&nbsp;</a></span>messageCreate()</h2>
+<a id="ga040f3e33d271531da96e0f5244d1a365"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#ga040f3e33d271531da96e0f5244d1a365">&#9670;&nbsp;</a></span>cancel_deferred()</h2>
 
 <div class="memitem">
 <div class="memproto">
       <table class="memname">
         <tr>
-          <td class="memname"><a class="el" href="group__transactioncapi.html#gaa42fca851fc0bcfd9dffc229c9552ce5">MessageHandle</a> messageCreate </td>
+          <td class="memname">void cancel_deferred </td>
           <td>(</td>
-          <td class="paramtype"><a class="el" href="group__types.html#gad67b43dc23285b01176f4c181c59fc23">AccountName</a>&#160;</td>
-          <td class="paramname"><em>code</em>, </td>
+          <td class="paramtype">const <a class="el" href="test__exchange_8cpp.html#a2d00695da4b0795588770b839f9f280e">uint128_t</a> &amp;&#160;</td>
+          <td class="paramname"><em>sender_id</em></td><td>)</td>
+          <td></td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+</div>
+</div>
+<a id="ga4eb270c6316a15e6f579b4b448bc8a74"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#ga4eb270c6316a15e6f579b4b448bc8a74">&#9670;&nbsp;</a></span>check_auth()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">void check_auth </td>
+          <td>(</td>
+          <td class="paramtype">const char *&#160;</td>
+          <td class="paramname"><em>serialized_transaction</em>, </td>
         </tr>
         <tr>
           <td class="paramkey"></td>
           <td></td>
-          <td class="paramtype"><a class="el" href="group__types.html#ga4c11ea58b1daa61a364225a757a05cd2">FuncName</a>&#160;</td>
+          <td class="paramtype"><a class="el" href="musl_2upstream_2include_2bits_2stddef_8h.html#a7c94ea6f8948649f8d181ae55911eeaf">size_t</a>&#160;</td>
+          <td class="paramname"><em>size</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">const char *&#160;</td>
+          <td class="paramname"><em>permissions</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype"><a class="el" href="musl_2upstream_2include_2bits_2stddef_8h.html#a7c94ea6f8948649f8d181ae55911eeaf">size_t</a>&#160;</td>
+          <td class="paramname"><em>psize</em>&#160;</td>
+        </tr>
+        <tr>
+          <td></td>
+          <td>)</td>
+          <td></td><td></td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+<p>Check that prodived authorizations is enough to execute the transaction </p>
+
+</div>
+</div>
+<a id="ga284f37e545cbb7f847f3ab86f50feb1d"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#ga284f37e545cbb7f847f3ab86f50feb1d">&#9670;&nbsp;</a></span>expiration()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname"><a class="el" href="group__types.html#ga1d2f3c0b7d3e40dcd34ee51b80f9da25">time</a> expiration </td>
+          <td>(</td>
+          <td class="paramname"></td><td>)</td>
+          <td></td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+<p>get the expiration of the currently executing transaction </p>
+
+</div>
+</div>
+<a id="gaf1fe78f3caf24010302e5cac1edad61d"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#gaf1fe78f3caf24010302e5cac1edad61d">&#9670;&nbsp;</a></span>get_action()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">int get_action </td>
+          <td>(</td>
+          <td class="paramtype"><a class="el" href="musl_2upstream_2include_2bits_2stdint_8h.html#a06896e8c53f721507066c079052171f8">uint32_t</a>&#160;</td>
           <td class="paramname"><em>type</em>, </td>
         </tr>
         <tr>
           <td class="paramkey"></td>
           <td></td>
-          <td class="paramtype">void const *&#160;</td>
-          <td class="paramname"><em>data</em>, </td>
+          <td class="paramtype"><a class="el" href="musl_2upstream_2include_2bits_2stdint_8h.html#a06896e8c53f721507066c079052171f8">uint32_t</a>&#160;</td>
+          <td class="paramname"><em>index</em>, </td>
         </tr>
         <tr>
           <td class="paramkey"></td>
           <td></td>
-          <td class="paramtype">int&#160;</td>
+          <td class="paramtype">char *&#160;</td>
+          <td class="paramname"><em>buff</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype"><a class="el" href="musl_2upstream_2include_2bits_2stddef_8h.html#a7c94ea6f8948649f8d181ae55911eeaf">size_t</a>&#160;</td>
           <td class="paramname"><em>size</em>&#160;</td>
         </tr>
         <tr>
@@ -213,68 +209,42 @@ Functions</h2></td></tr>
         </tr>
       </table>
 </div><div class="memdoc">
-<p>This function creates a pending message to be included in a deferred transaction or to be send as an inline message</p>
-<p>This message has no default permissions, see <a class="el" href="group__transactioncapi.html#gabf3f53f695c30abe4bd48f9b3341a016">messageRequirePermission</a></p>
-<dl class="params"><dt>Parameters</dt><dd>
+<p>Retrieve the indicated action from the active transaction. </p><dl class="params"><dt>Parameters</dt><dd>
   <table class="params">
-    <tr><td class="paramname">code</td><td>- the <code>AccountName</code> which owns the contract code to execute </td></tr>
-    <tr><td class="paramname">type</td><td>- the type of this message </td></tr>
-    <tr><td class="paramname">data</td><td>- the payload data for this message </td></tr>
-    <tr><td class="paramname">size</td><td>- the size of <code>data</code> </td></tr>
+    <tr><td class="paramname">type</td><td>- 0 for context free action, 1 for action </td></tr>
+    <tr><td class="paramname">index</td><td>- the index of the requested action </td></tr>
+    <tr><td class="paramname">buff</td><td>- output packed buff of the action </td></tr>
+    <tr><td class="paramname">size</td><td>- amount of buff read, pass 0 to have size returned </td></tr>
   </table>
   </dd>
 </dl>
+<dl class="section return"><dt>Returns</dt><dd>the size of the action, -1 on failure </dd></dl>
 
 </div>
 </div>
-<a id="ga77f1412808c199633b41bf2f20e3cb45"></a>
-<h2 class="memtitle"><span class="permalink"><a href="#ga77f1412808c199633b41bf2f20e3cb45">&#9670;&nbsp;</a></span>messageDrop()</h2>
+<a id="gad0f4f1bd76077b3ee4289aadfb84c2b2"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#gad0f4f1bd76077b3ee4289aadfb84c2b2">&#9670;&nbsp;</a></span>get_context_free_data()</h2>
 
 <div class="memitem">
 <div class="memproto">
       <table class="memname">
         <tr>
-          <td class="memname">void messageDrop </td>
+          <td class="memname">int get_context_free_data </td>
           <td>(</td>
-          <td class="paramtype"><a class="el" href="group__transactioncapi.html#gaa42fca851fc0bcfd9dffc229c9552ce5">MessageHandle</a>&#160;</td>
-          <td class="paramname"><em>msg</em></td><td>)</td>
-          <td></td>
-        </tr>
-      </table>
-</div><div class="memdoc">
-<p>This handle should be considered invalid after the call</p>
-<dl class="params"><dt>Parameters</dt><dd>
-  <table class="params">
-    <tr><td class="paramname">trx</td><td>- the <code>MessageHandle</code> of the pending message to discard </td></tr>
-  </table>
-  </dd>
-</dl>
-
-</div>
-</div>
-<a id="gabf3f53f695c30abe4bd48f9b3341a016"></a>
-<h2 class="memtitle"><span class="permalink"><a href="#gabf3f53f695c30abe4bd48f9b3341a016">&#9670;&nbsp;</a></span>messageRequirePermission()</h2>
-
-<div class="memitem">
-<div class="memproto">
-      <table class="memname">
-        <tr>
-          <td class="memname">void messageRequirePermission </td>
-          <td>(</td>
-          <td class="paramtype"><a class="el" href="group__transactioncapi.html#gaa42fca851fc0bcfd9dffc229c9552ce5">MessageHandle</a>&#160;</td>
-          <td class="paramname"><em>msg</em>, </td>
+          <td class="paramtype"><a class="el" href="musl_2upstream_2include_2bits_2stdint_8h.html#a06896e8c53f721507066c079052171f8">uint32_t</a>&#160;</td>
+          <td class="paramname"><em>index</em>, </td>
         </tr>
         <tr>
           <td class="paramkey"></td>
           <td></td>
-          <td class="paramtype"><a class="el" href="group__types.html#gad67b43dc23285b01176f4c181c59fc23">AccountName</a>&#160;</td>
-          <td class="paramname"><em>account</em>, </td>
+          <td class="paramtype">char *&#160;</td>
+          <td class="paramname"><em>buff</em>, </td>
         </tr>
         <tr>
           <td class="paramkey"></td>
           <td></td>
-          <td class="paramtype"><a class="el" href="group__types.html#ga4bd93be9c597a8d7b6a1a3504ca63e83">PermissionName</a>&#160;</td>
-          <td class="paramname"><em>permission</em>&#160;</td>
+          <td class="paramtype"><a class="el" href="musl_2upstream_2include_2bits_2stddef_8h.html#a7c94ea6f8948649f8d181ae55911eeaf">size_t</a>&#160;</td>
+          <td class="paramname"><em>size</em>&#160;</td>
         </tr>
         <tr>
           <td></td>
@@ -283,60 +253,35 @@ Functions</h2></td></tr>
         </tr>
       </table>
 </div><div class="memdoc">
-<p>Indicates that a given pending message requires a certain permission</p>
-<dl class="params"><dt>Parameters</dt><dd>
+<p>Retrieve the signed_transaction.context_free_data[index]. </p><dl class="params"><dt>Parameters</dt><dd>
   <table class="params">
-    <tr><td class="paramname">msg</td><td>- the <code>MessageHandle</code> pending message referred to </td></tr>
-    <tr><td class="paramname">account</td><td>- the <code>AccountName</code> to of the permission </td></tr>
-    <tr><td class="paramname">permission</td><td>- the <code>PermissionName</code> to of the permision </td></tr>
+    <tr><td class="paramname">index</td><td>- the index of the context_free_data entry to retrieve </td></tr>
+    <tr><td class="paramname">buff</td><td>- output buff of the context_free_data entry </td></tr>
+    <tr><td class="paramname">size</td><td>- amount of context_free_data[index] to retrieve into buff </td></tr>
   </table>
   </dd>
 </dl>
+<dl class="section return"><dt>Returns</dt><dd>signed_transaction.context_free_data[index].size() or -1 if index not valid </dd></dl>
 
 </div>
 </div>
-<a id="ga1f9346e3ef3fae10cf5fee5b9a0270ca"></a>
-<h2 class="memtitle"><span class="permalink"><a href="#ga1f9346e3ef3fae10cf5fee5b9a0270ca">&#9670;&nbsp;</a></span>messageSend()</h2>
+<a id="ga73fa4253ae0aec55399c26b740223bc6"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#ga73fa4253ae0aec55399c26b740223bc6">&#9670;&nbsp;</a></span>read_transaction()</h2>
 
 <div class="memitem">
 <div class="memproto">
       <table class="memname">
         <tr>
-          <td class="memname">void messageSend </td>
+          <td class="memname"><a class="el" href="musl_2upstream_2include_2bits_2stddef_8h.html#a7c94ea6f8948649f8d181ae55911eeaf">size_t</a> read_transaction </td>
           <td>(</td>
-          <td class="paramtype"><a class="el" href="group__transactioncapi.html#gaa42fca851fc0bcfd9dffc229c9552ce5">MessageHandle</a>&#160;</td>
-          <td class="paramname"><em>msg</em></td><td>)</td>
-          <td></td>
-        </tr>
-      </table>
-</div><div class="memdoc">
-<p>This handle should be considered invalid after the call</p>
-<dl class="params"><dt>Parameters</dt><dd>
-  <table class="params">
-    <tr><td class="paramname">msg</td><td>- the <code>MessageHandle</code> of the pending message to send inline </td></tr>
-  </table>
-  </dd>
-</dl>
-
-</div>
-</div>
-<a id="ga1290a226d7828410020ed2954ffa5fa5"></a>
-<h2 class="memtitle"><span class="permalink"><a href="#ga1290a226d7828410020ed2954ffa5fa5">&#9670;&nbsp;</a></span>transactionAddMessage()</h2>
-
-<div class="memitem">
-<div class="memproto">
-      <table class="memname">
-        <tr>
-          <td class="memname">void transactionAddMessage </td>
-          <td>(</td>
-          <td class="paramtype"><a class="el" href="group__transactioncapi.html#ga7a095ea0165891d5ee1dbd8ee40e32cb">TransactionHandle</a>&#160;</td>
-          <td class="paramname"><em>trx</em>, </td>
+          <td class="paramtype">char *&#160;</td>
+          <td class="paramname"><em>buffer</em>, </td>
         </tr>
         <tr>
           <td class="paramkey"></td>
           <td></td>
-          <td class="paramtype"><a class="el" href="group__transactioncapi.html#gaa42fca851fc0bcfd9dffc229c9552ce5">MessageHandle</a>&#160;</td>
-          <td class="paramname"><em>msg</em>&#160;</td>
+          <td class="paramtype"><a class="el" href="musl_2upstream_2include_2bits_2stddef_8h.html#a7c94ea6f8948649f8d181ae55911eeaf">size_t</a>&#160;</td>
+          <td class="paramname"><em>size</em>&#160;</td>
         </tr>
         <tr>
           <td></td>
@@ -345,128 +290,109 @@ Functions</h2></td></tr>
         </tr>
       </table>
 </div><div class="memdoc">
-<p>The message handle should be considered invalid after the call</p>
+<p>access a copy of the currently executing transaction</p>
 <dl class="params"><dt>Parameters</dt><dd>
   <table class="params">
-    <tr><td class="paramname">trx</td><td>- the <code>TransactionHandle</code> of the pending transaction to modify </td></tr>
-    <tr><td class="paramname">msg</td><td>- the <code>MessageHandle</code> of the pending message to add </td></tr>
+    <tr><td class="paramname">buffer</td><td>- a buffer to write the current transaction to </td></tr>
+    <tr><td class="paramname">size</td><td>- the size of the buffer </td></tr>
   </table>
   </dd>
 </dl>
+<dl class="section return"><dt>Returns</dt><dd>the size of the transaction written to the buffer </dd></dl>
 
 </div>
 </div>
-<a id="ga180dc33e735f9631ed9a800d7b0a511e"></a>
-<h2 class="memtitle"><span class="permalink"><a href="#ga180dc33e735f9631ed9a800d7b0a511e">&#9670;&nbsp;</a></span>transactionCreate()</h2>
+<a id="gaa7c68af746c8bd721d7c0817d6904a76"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#gaa7c68af746c8bd721d7c0817d6904a76">&#9670;&nbsp;</a></span>send_deferred()</h2>
 
 <div class="memitem">
 <div class="memproto">
       <table class="memname">
         <tr>
-          <td class="memname"><a class="el" href="group__transactioncapi.html#ga7a095ea0165891d5ee1dbd8ee40e32cb">TransactionHandle</a> transactionCreate </td>
+          <td class="memname">void send_deferred </td>
+          <td>(</td>
+          <td class="paramtype">const <a class="el" href="test__exchange_8cpp.html#a2d00695da4b0795588770b839f9f280e">uint128_t</a> &amp;&#160;</td>
+          <td class="paramname"><em>sender_id</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype"><a class="el" href="group__types.html#ga3b44deb4b3b8d6ebab339d1263692117">account_name</a>&#160;</td>
+          <td class="paramname"><em>payer</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">const char *&#160;</td>
+          <td class="paramname"><em>serialized_transaction</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype"><a class="el" href="musl_2upstream_2include_2bits_2stddef_8h.html#a7c94ea6f8948649f8d181ae55911eeaf">size_t</a>&#160;</td>
+          <td class="paramname"><em>size</em>&#160;</td>
+        </tr>
+        <tr>
+          <td></td>
+          <td>)</td>
+          <td></td><td></td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+</div>
+</div>
+<a id="gac0b858a766ca73c6415bdb799d6ef45a"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#gac0b858a766ca73c6415bdb799d6ef45a">&#9670;&nbsp;</a></span>tapos_block_num()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">int tapos_block_num </td>
           <td>(</td>
           <td class="paramname"></td><td>)</td>
           <td></td>
         </tr>
       </table>
 </div><div class="memdoc">
-<p>This function allocates a native transaction and returns a handle to the caller. Within the context of a single transaction there is a soft limit to the number of pending transactions that can be open at a time. This limit is at the descretion of the Producers and exceding it will result in the current transaction context failing.</p>
-<dl class="section return"><dt>Returns</dt><dd>handle used to refer to this transaction in future API calls </dd></dl>
+<p>get the block number used for TAPOS on the currently executing transaction </p>
 
 </div>
 </div>
-<a id="ga37162c1f843ae69d0134be29b1cde61f"></a>
-<h2 class="memtitle"><span class="permalink"><a href="#ga37162c1f843ae69d0134be29b1cde61f">&#9670;&nbsp;</a></span>transactionDrop()</h2>
-
-<div class="memitem">
-<div class="memproto">
-      <table class="memname">
-        <tr>
-          <td class="memname">void transactionDrop </td>
-          <td>(</td>
-          <td class="paramtype"><a class="el" href="group__transactioncapi.html#ga7a095ea0165891d5ee1dbd8ee40e32cb">TransactionHandle</a>&#160;</td>
-          <td class="paramname"><em>trx</em></td><td>)</td>
-          <td></td>
-        </tr>
-      </table>
-</div><div class="memdoc">
-<p>This function will discard a pending transaction and its associated resources. Once a transaction is sent it can no longer be dropped.</p>
-<p>This handle should be considered invalid after the call</p>
-<dl class="params"><dt>Parameters</dt><dd>
-  <table class="params">
-    <tr><td class="paramname">trx</td><td>- the <code>TransactionHandle</code> of the pending transaction to send </td></tr>
-  </table>
-  </dd>
-</dl>
-
-</div>
-</div>
-<a id="ga347cc9c284bc25ed1d67b596e2320cdc"></a>
-<h2 class="memtitle"><span class="permalink"><a href="#ga347cc9c284bc25ed1d67b596e2320cdc">&#9670;&nbsp;</a></span>transactionRequireScope()</h2>
+<a id="gaef5458ccfe8ca5d6b273e35d04c56371"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#gaef5458ccfe8ca5d6b273e35d04c56371">&#9670;&nbsp;</a></span>tapos_block_prefix()</h2>
 
 <div class="memitem">
 <div class="memproto">
       <table class="memname">
         <tr>
-          <td class="memname">void transactionRequireScope </td>
+          <td class="memname">int tapos_block_prefix </td>
           <td>(</td>
-          <td class="paramtype"><a class="el" href="group__transactioncapi.html#ga7a095ea0165891d5ee1dbd8ee40e32cb">TransactionHandle</a>&#160;</td>
-          <td class="paramname"><em>trx</em>, </td>
-        </tr>
-        <tr>
-          <td class="paramkey"></td>
+          <td class="paramname"></td><td>)</td>
           <td></td>
-          <td class="paramtype"><a class="el" href="group__types.html#gad67b43dc23285b01176f4c181c59fc23">AccountName</a>&#160;</td>
-          <td class="paramname"><em>scope</em>, </td>
-        </tr>
-        <tr>
-          <td class="paramkey"></td>
-          <td></td>
-          <td class="paramtype">int&#160;</td>
-          <td class="paramname"><em>readOnly</em> = <code>0</code>&#160;</td>
-        </tr>
-        <tr>
-          <td></td>
-          <td>)</td>
-          <td></td><td></td>
         </tr>
       </table>
 </div><div class="memdoc">
-<p>This function adds either a <code>scope</code> or <code>readScope</code> to the given pending transaction.</p>
-<dl class="params"><dt>Parameters</dt><dd>
-  <table class="params">
-    <tr><td class="paramname">trx</td><td>- the <code>TransactionHandle</code> of the pending transaction to modify </td></tr>
-    <tr><td class="paramname">scope</td><td>- the <code>AccountName</code> to add </td></tr>
-    <tr><td class="paramname">readOnly</td><td>- whether <code>scope</code> should be added to <code>scope[]</code> or <code>readScope[]</code> </td></tr>
-  </table>
-  </dd>
-</dl>
+<p>get the block prefix used for TAPOS on the currently executing transaction </p>
 
 </div>
 </div>
-<a id="ga01eab43648b29422885d4d59a2864aaf"></a>
-<h2 class="memtitle"><span class="permalink"><a href="#ga01eab43648b29422885d4d59a2864aaf">&#9670;&nbsp;</a></span>transactionSend()</h2>
+<a id="gadfcd2e00f00461eac891ee8433508609"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#gadfcd2e00f00461eac891ee8433508609">&#9670;&nbsp;</a></span>transaction_size()</h2>
 
 <div class="memitem">
 <div class="memproto">
       <table class="memname">
         <tr>
-          <td class="memname">void transactionSend </td>
+          <td class="memname"><a class="el" href="musl_2upstream_2include_2bits_2stddef_8h.html#a7c94ea6f8948649f8d181ae55911eeaf">size_t</a> transaction_size </td>
           <td>(</td>
-          <td class="paramtype"><a class="el" href="group__transactioncapi.html#ga7a095ea0165891d5ee1dbd8ee40e32cb">TransactionHandle</a>&#160;</td>
-          <td class="paramname"><em>trx</em></td><td>)</td>
+          <td class="paramname"></td><td>)</td>
           <td></td>
         </tr>
       </table>
 </div><div class="memdoc">
-<p>This function will finalize a pending transaction and enqueue it for processing either immediately after this transaction and its previously sent inline transactions complete OR in a future block.</p>
-<p>This handle should be considered invalid after the call</p>
-<dl class="params"><dt>Parameters</dt><dd>
-  <table class="params">
-    <tr><td class="paramname">trx</td><td>- the <code>TransactionHandle</code> of the pending transaction to send </td></tr>
-  </table>
-  </dd>
-</dl>
+<p>get the size of the currently executing transaction </p>
 
 </div>
 </div>

@@ -6,6 +6,7 @@
 #include <fc/log/file_appender.hpp>
 #include <fc/log/gelf_appender.hpp>
 #include <fc/variant.hpp>
+#include <mutex>
 #include "console_defines.h"
 
 
@@ -20,8 +21,8 @@ namespace fc {
      return lm;
    }
    appender::ptr appender::get( const fc::string& s ) {
-//     static fc::spin_lock appender_spinlock;
-//      scoped_lock<spin_lock> lock(appender_spinlock);
+      static std::mutex appender_mutex;
+      std::lock_guard<std::mutex> lock(appender_mutex);
       return get_appender_map()[s];
    }
    bool  appender::register_appender( const fc::string& type, const appender_factory::ptr& f )
@@ -40,9 +41,9 @@ namespace fc {
       get_appender_map()[name] = ap;
       return ap;
    }
-   
+
    static bool reg_console_appender = appender::register_appender<console_appender>( "console" );
-//   static bool reg_file_appender = appender::register_appender<file_appender>( "file" );
-//  static bool reg_gelf_appender = appender::register_appender<gelf_appender>( "gelf" );
+   //static bool reg_file_appender = appender::register_appender<file_appender>( "file" );
+   static bool reg_gelf_appender = appender::register_appender<gelf_appender>( "gelf" );
 
 } // namespace fc

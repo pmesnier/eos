@@ -1,4 +1,7 @@
-#include <eoslib/eos.hpp>
-#include <eoslib/db.hpp>
+/**
+ *  @file
+ *  @copyright defined in eos/LICENSE.txt
+ */
+#include <eosiolib/eosio.hpp>
 
 

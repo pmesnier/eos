@@ -1,331 +1,250 @@
-/**
- *  @file exchange.cpp
- *  @brief defines an example exchange contract 
- *
- *  This exchange contract assumes the existence of two currency contracts
- *  located at @currencya and @currencyb.  These currency contracts have
- *  provided an API header defined in currench.hpp which the exchange 
- *  contract will use to process messages related to deposits and withdraws.
- *
- *  The exchange contract knows that the currency contracts requireNotice()
- *  of both the sender and receiver; therefore, the exchange contract can
- *  implement a message handler that will be called anytime funds are deposited
- *  to or withdrawn from the exchange.
- *
- *  When tokens are sent to @exchange from another account the exchange will
- *  credit the user's balance of the proper currency. 
- *
- *  To withdraw from the exchange, the user simply reverses the "to" and "from"
- *  fields of the currency contract transfer message. The currency contract will
- *  require the "authority" of the exchange, but the exchange's init() function
- *  configured this permission to allow *anyone* to transfer from the exchange.
- *
- *  To prevent people from stealing all the money from the exchange, the
- *  exchange's transfer handler  requires both the authority of the receiver and
- *  asserts that the user has a sufficient balance on the exchange. Lacking
- *  both of these the exchange will kill the transfer.
- *
- *  The exchange and one of the currency contracts are forced to execute in the same
- *  thread anytime there is a deposit or withdraw. The transaction containing
- *  the transfer are already required to include the exchange in the scope by
- *  the currency contract.
- *
- *  creating, canceling, and filling orders do not require blocking either currency
- *  contract.  Users can only deposit or withdraw to their own currency account.
- */
-#include <exchange/exchange.hpp> /// defines transfer struct
-#include <eoslib/print.hpp>
+#include <math.h>
+#include "exchange.hpp"
 
-using namespace exchange;
-using namespace eos;
+#include "exchange_state.cpp"
+#include "exchange_accounts.cpp"
+#include "market_state.cpp"
 
-namespace exchange {
-inline void save( const Account& a ) {
-   if( a.isEmpty() ) {
-      print("remove");
-      Accounts::remove(a);
+#include <eosiolib/dispatcher.hpp>
+
+namespace eosio {
+
+   void exchange::deposit( account_name from, extended_asset quantity ) {
+      eosio_assert( quantity.is_valid(), "invalid quantity" );
+      currency::inline_transfer( from, _this_contract, quantity, "deposit" );
+      _accounts.adjust_balance( from, quantity, "deposit" );
    }
-   else {
-      print("store");
-      Accounts::store(a);
+
+   void exchange::withdraw( account_name from, extended_asset quantity ) {
+      require_auth( from );
+      eosio_assert( quantity.is_valid(), "invalid quantity" );
+      eosio_assert( quantity.amount >= 0, "cannot withdraw negative balance" ); // Redundant? inline_transfer will fail if quantity is not positive.
+      _accounts.adjust_balance( from, -quantity );
+      currency::inline_transfer( _this_contract, from, quantity, "withdraw" );
    }
-}
 
-template<typename Lambda>
-inline void modifyAccount( AccountName a, Lambda&& modify ) {
-   auto acnt = getAccount( a );
-   modify( acnt );
-   save( acnt );
-}
+   void exchange::on( const trade& t ) {
+      require_auth( t.seller );
+      eosio_assert( t.sell.is_valid(), "invalid sell amount" );
+      eosio_assert( t.sell.amount > 0, "sell amount must be positive" );
+      eosio_assert( t.min_receive.is_valid(), "invalid min receive amount" );
+      eosio_assert( t.min_receive.amount >= 0, "min receive amount cannot be negative" );
 
-/**
- *  This method is called after the "transfer" action of code
- *  "currencya" is called and "exchange" is listed in the notifiers.
- */
-void apply_currency_transfer( const currency::Transfer& transfer ) {
-   if( transfer.to == N(exchange) ) {
-      modifyAccount( transfer.from, [&]( Account& account ){ 
-          account.currency_balance += transfer.quantity; 
+      auto receive_symbol = t.min_receive.get_extended_symbol();
+      eosio_assert( t.sell.get_extended_symbol() != receive_symbol, "invalid conversion" );
+
+      market_state market( _this_contract, t.market, _accounts );
+
+      auto temp   = market.exstate;
+      auto output = temp.convert( t.sell, receive_symbol );
+
+      while( temp.requires_margin_call() ) {
+         market.margin_call( receive_symbol );
+         temp = market.exstate;
+         output = temp.convert( t.sell, receive_symbol );
+      }
+      market.exstate = temp;
+
+      print( name{t.seller}, "   ", t.sell, "  =>  ", output, "\n" );
+
+      if( t.min_receive.amount != 0 ) {
+         eosio_assert( t.min_receive.amount <= output.amount, "unable to fill" );
+      }
+
+      _accounts.adjust_balance( t.seller, -t.sell, "sold" );
+      _accounts.adjust_balance( t.seller, output, "received" );
+
+      if( market.exstate.supply.amount != market.initial_state().supply.amount ) {
+         auto delta = market.exstate.supply - market.initial_state().supply;
+
+         _excurrencies.issue_currency( { .to = _this_contract,
+                                        .quantity = delta,
+                                        .memo = string("") } );
+      }
+
+      /// TODO: if pending order start deferred trx to fill it
+
+      market.save();
+   }
+
+
+   /**
+    *  This action shall fail if it would result in a margin call
+    */
+   void exchange::on( const upmargin& b ) {
+      require_auth( b.borrower );
+      eosio_assert( b.delta_borrow.is_valid(), "invalid borrow delta" );
+      eosio_assert( b.delta_collateral.is_valid(), "invalid collateral delta" );
+
+      market_state market( _this_contract, b.market, _accounts );
+
+      eosio_assert( b.delta_borrow.amount != 0 || b.delta_collateral.amount != 0, "no effect" );
+      eosio_assert( b.delta_borrow.get_extended_symbol() != b.delta_collateral.get_extended_symbol(), "invalid args" );
+      eosio_assert( market.exstate.base.balance.get_extended_symbol() == b.delta_borrow.get_extended_symbol() ||
+                    market.exstate.quote.balance.get_extended_symbol() == b.delta_borrow.get_extended_symbol(),
+                    "invalid asset for market" );
+      eosio_assert( market.exstate.base.balance.get_extended_symbol() == b.delta_collateral.get_extended_symbol() ||
+                    market.exstate.quote.balance.get_extended_symbol() == b.delta_collateral.get_extended_symbol(),
+                    "invalid asset for market" );
+
+      market.update_margin( b.borrower, b.delta_borrow, b.delta_collateral );
+
+     /// if this succeeds then the borrower will see their balances adjusted accordingly,
+     /// if they don't have sufficient balance to either fund the collateral or pay off the
+     /// debt then this will fail before we go further.
+     _accounts.adjust_balance( b.borrower, b.delta_borrow, "borrowed" );
+     _accounts.adjust_balance( b.borrower, -b.delta_collateral, "collateral" );
+
+     market.save();
+   }
+
+   void exchange::on( const covermargin& c ) {
+      require_auth( c.borrower );
+      eosio_assert( c.cover_amount.is_valid(), "invalid cover amount" );
+      eosio_assert( c.cover_amount.amount > 0, "cover amount must be positive" );
+
+      market_state market( _this_contract, c.market, _accounts );
+
+      market.cover_margin( c.borrower, c.cover_amount);
+
+      market.save();
+   }
+
+   void exchange::createx( account_name    creator,
+                 asset           initial_supply,
+                 uint32_t        fee,
+                 extended_asset  base_deposit,
+                 extended_asset  quote_deposit
+               ) {
+      require_auth( creator );
+      eosio_assert( initial_supply.is_valid(), "invalid initial supply" );
+      eosio_assert( initial_supply.amount > 0, "initial supply must be positive" );
+      eosio_assert( base_deposit.is_valid(), "invalid base deposit" );
+      eosio_assert( base_deposit.amount > 0, "base deposit must be positive" );
+      eosio_assert( quote_deposit.is_valid(), "invalid quote deposit" );
+      eosio_assert( quote_deposit.amount > 0, "quote deposit must be positive" );
+      eosio_assert( base_deposit.get_extended_symbol() != quote_deposit.get_extended_symbol(),
+                    "must exchange between two different currencies" );
+
+      print( "base: ", base_deposit.get_extended_symbol() );
+      print( "quote: ",quote_deposit.get_extended_symbol() );
+
+      auto exchange_symbol = initial_supply.symbol.name();
+      print( "marketid: ", exchange_symbol, " \n " );
+
+      markets exstates( _this_contract, exchange_symbol );
+      auto existing = exstates.find( exchange_symbol );
+
+      eosio_assert( existing == exstates.end(), "market already exists" );
+      exstates.emplace( creator, [&]( auto& s ) {
+          s.manager = creator;
+          s.supply  = extended_asset(initial_supply, _this_contract);
+          s.base.balance = base_deposit;
+          s.quote.balance = quote_deposit;
+
+          s.base.peer_margin.total_lent.symbol          = base_deposit.symbol;
+          s.base.peer_margin.total_lent.contract        = base_deposit.contract;
+          s.base.peer_margin.total_lendable.symbol      = base_deposit.symbol;
+          s.base.peer_margin.total_lendable.contract    = base_deposit.contract;
+
+          s.quote.peer_margin.total_lent.symbol         = quote_deposit.symbol;
+          s.quote.peer_margin.total_lent.contract       = quote_deposit.contract;
+          s.quote.peer_margin.total_lendable.symbol     = quote_deposit.symbol;
+          s.quote.peer_margin.total_lendable.contract   = quote_deposit.contract;
       });
-   } else if( transfer.from == N(exchange) ) {
-      requireAuth( transfer.to ); /// require the reciever of funds (account owner) to authorize this transfer
 
-      modifyAccount( transfer.to, [&]( Account& account ){ 
-          account.currency_balance -= transfer.quantity; 
-      });
-   } else {
-      assert( false, "notified on transfer that is not relevant to this exchange" );
-   }
-}
+      _excurrencies.create_currency( { .issuer = _this_contract,
+                                 // TODO: After currency contract respects maximum supply limits, the maximum supply here needs to be set appropriately.
+                                .maximum_supply = asset( 0, initial_supply.symbol ),
+                                .issuer_can_freeze = false,
+                                .issuer_can_whitelist = false,
+                                .issuer_can_recall = false } );
 
-/**
- *  This method is called after the "transfer" action of code
- *  "currencya" is called and "exchange" is listed in the notifiers.
- */
-void apply_eos_transfer( const eos::Transfer& transfer ) {
-   if( transfer.to == N(exchange) ) {
-      modifyAccount( transfer.from, [&]( Account& account ){ 
-          account.eos_balance += transfer.quantity; 
-      });
-   } else if( transfer.from == N(exchange) ) {
-      requireAuth( transfer.to ); /// require the reciever of funds (account owner) to authorize this transfer
+      _excurrencies.issue_currency( { .to = _this_contract,
+                                     .quantity = initial_supply,
+                                     .memo = string("initial exchange tokens") } );
 
-      modifyAccount( transfer.to, [&]( Account& account ){ 
-          account.eos_balance -= transfer.quantity; 
-      });
-   } else {
-      assert( false, "notified on transfer that is not relevant to this exchange" );
-   }
-}
-
-void match( Bid& bid, Account& buyer, Ask& ask, Account& seller ) {
-   print( "match bid: ", bid, "\nmatch ask: ", ask, "\n");
-
-   eos::Tokens ask_eos = ask.quantity * ask.price;
-
-   EosTokens      fill_amount_eos = min<eos::Tokens>( ask_eos, bid.quantity );
-   CurrencyTokens fill_amount_currency;
-
-   if( fill_amount_eos == ask_eos ) { /// complete fill of ask
-      fill_amount_currency = ask.quantity;
-   } else { /// complete fill of buy
-      fill_amount_currency = fill_amount_eos / ask.price;
+      _accounts.adjust_balance( creator, extended_asset( initial_supply, _this_contract ), "new exchange issue" );
+      _accounts.adjust_balance( creator, -base_deposit, "new exchange deposit" );
+      _accounts.adjust_balance( creator, -quote_deposit, "new exchange deposit" );
    }
 
-   print( "\n\nmatch bid: ", Name(bid.buyer.name), ":", bid.buyer.number,
-          "match ask: ", Name(ask.seller.name), ":", ask.seller.number, "\n\n" );
+   void exchange::lend( account_name lender, symbol_type market, extended_asset quantity ) {
+      require_auth( lender );
+      eosio_assert( quantity.is_valid(), "invalid quantity" );
+      eosio_assert( quantity.amount > 0, "must lend a positive amount" );
 
-
-   bid.quantity -= fill_amount_eos;
-   seller.eos_balance += fill_amount_eos;
-
-   ask.quantity -= fill_amount_currency;
-   buyer.currency_balance += fill_amount_currency;
-}
-
-/**
- * 
- *  
- */
-void apply_exchange_buy( BuyOrder order ) {
-   Bid& bid = order;
-   requireAuth( bid.buyer.name ); 
-
-   assert( bid.quantity > eos::Tokens(0), "invalid quantity" );
-   assert( bid.expiration > now(), "order expired" );
-
-   print( Name(bid.buyer.name), " created bid for ", order.quantity, " currency at price: ", order.price, "\n" );
-
-   Bid existing_bid;
-   assert( !BidsById::get( bid.buyer, existing_bid ), "order with this id already exists" );
-   print( __FILE__, __LINE__, "\n" );
-
-   auto buyer_account = getAccount( bid.buyer.name );
-   buyer_account.eos_balance -= bid.quantity;
-
-   Ask lowest_ask;
-   if( !AsksByPrice::front( lowest_ask ) ) {
-      print( "\n No asks found, saving buyer account and storing bid\n" );
-      assert( !order.fill_or_kill, "order not completely filled" );
-      Bids::store( bid );
-      buyer_account.open_orders++;
-      save( buyer_account );
-      return;
+      market_state m( _this_contract, market, _accounts );
+      m.lend( lender, quantity );
+      m.save();
    }
 
-   print( "ask: ", lowest_ask, "\n" );
-   print( "bid: ", bid, "\n" );
+   void exchange::unlend( account_name lender, symbol_type market, double interest_shares, extended_symbol interest_symbol ) {
+      require_auth( lender );
+      eosio_assert( interest_shares > 0, "must unlend a positive amount" );
 
-   auto seller_account = getAccount( lowest_ask.seller.name );
+      market_state m( _this_contract, market, _accounts );
+      m.unlend( lender, interest_shares, interest_symbol );
+      m.save();
+   }
 
-   while( lowest_ask.price <= bid.price ) {
-      print( "lowest ask <= bid.price\n" );
-      match( bid, buyer_account, lowest_ask, seller_account );
 
-      if( lowest_ask.quantity == CurrencyTokens(0) ) {
-         seller_account.open_orders--;
-         save( seller_account );
-         save( buyer_account );
-         Asks::remove( lowest_ask );
-         if( !AsksByPrice::front( lowest_ask ) ) {
-            break;
-         }
-         seller_account = getAccount( lowest_ask.seller.name );
-      } else {
-         break; // buyer's bid should be filled
+   void exchange::on( const currency::transfer& t, account_name code ) {
+      if( code == _this_contract )
+         _excurrencies.on( t );
+
+      if( t.to == _this_contract ) {
+         auto a = extended_asset(t.quantity, code);
+         eosio_assert( a.is_valid(), "invalid quantity in transfer" );
+         eosio_assert( a.amount != 0, "zero quantity is disallowed in transfer");
+         eosio_assert( a.amount > 0 || t.memo == "withdraw", "withdrew tokens without withdraw in memo");
+         eosio_assert( a.amount < 0 || t.memo == "deposit", "received tokens without deposit in memo" );
+         _accounts.adjust_balance( t.from, a, t.memo );
       }
    }
-   print( "lowest_ask >= bid.price or buyer's bid has been filled\n" );
-
-   if( bid.quantity && !order.fill_or_kill ) buyer_account.open_orders++;
-   save( buyer_account );
-   print( "saving buyer's account\n" );
-   if( bid.quantity ) {
-      print( bid.quantity, " eos left over" );
-      assert( !order.fill_or_kill, "order not completely filled" );
-      Bids::store( bid );
-      return;
-   }
-   print( "bid filled\n" );
-
-}
-
-void apply_exchange_sell( SellOrder order ) {
-   Ask& ask = order;
-   requireAuth( ask.seller.name ); 
-
-   assert( ask.quantity > CurrencyTokens(0), "invalid quantity" );
-   assert( ask.expiration > now(), "order expired" );
-
-   print( "\n\n", Name(ask.seller.name), " created sell for ", order.quantity, 
-          " currency at price: ", order.price, "\n");
-
-   Ask existing_ask;
-   assert( !AsksById::get( ask.seller, existing_ask ), "order with this id already exists" );
-
-   auto seller_account = getAccount( ask.seller.name );
-   seller_account.currency_balance -= ask.quantity;
 
 
-   Bid highest_bid;
-   if( !BidsByPrice::back( highest_bid ) ) {
-      assert( !order.fill_or_kill, "order not completely filled" );
-      print( "\n No bids found, saving seller account and storing ask\n" );
-      Asks::store( ask );
-      seller_account.open_orders++;
-      save( seller_account );
-      return;
-   }
+   #define N(X) ::eosio::string_to_name(#X)
 
-   print( "\n bids found, lets see what matches\n" );
-   auto buyer_account = getAccount( highest_bid.buyer.name );
+   void exchange::apply( account_name contract, account_name act ) {
 
-   while( highest_bid.price >= ask.price ) {
-      match( highest_bid, buyer_account, ask, seller_account );
+      if( act == N(transfer) ) {
+         on( unpack_action_data<currency::transfer>(), contract );
+         return;
+      }
 
-      if( highest_bid.quantity == EosTokens(0) ) {
-         buyer_account.open_orders--;
-         save( seller_account );
-         save( buyer_account );
-         Bids::remove( highest_bid );
-         if( !BidsByPrice::back( highest_bid ) ) {
-            break;
-         }
-         buyer_account = getAccount( highest_bid.buyer.name );
-      } else {
-         break; // buyer's bid should be filled
+      if( contract != _this_contract )
+         return;
+
+      auto& thiscontract = *this;
+      switch( act ) {
+         EOSIO_API( exchange, (createx)(deposit)(withdraw)(lend)(unlend) )
+      };
+
+      switch( act ) {
+         case N(trade):
+            on( unpack_action_data<trade>() );
+            return;
+         case N(upmargin):
+            on( unpack_action_data<upmargin>() );
+            return;
+         case N(covermargin):
+            on( unpack_action_data<covermargin>() );
+            return;
+         default:
+            _excurrencies.apply( contract, act ); 
+            return;
       }
    }
-   
-   if( ask.quantity && !order.fill_or_kill ) seller_account.open_orders++;
-   save( seller_account );
-   if( ask.quantity ) {
-      assert( !order.fill_or_kill, "order not completely filled" );
-      print( "saving ask\n" );
-      Asks::store( ask );
-      return;
-   }
 
-   print( "ask filled\n" );
-}
+} /// namespace eosio
 
-void apply_exchange_cancel_buy( OrderID order ) {
-   requireAuth( order.name ); 
 
-   Bid bid_to_cancel;
-   assert( BidsById::get( order, bid_to_cancel ), "bid with this id does not exists" );
-   
-   auto buyer_account = getAccount( order.name );
-   buyer_account.eos_balance += bid_to_cancel.quantity;
-   buyer_account.open_orders--;
-
-   Bids::remove( bid_to_cancel );
-   save( buyer_account );
-
-   print( "bid removed\n" );
-}
-
-void apply_exchange_cancel_sell( OrderID order ) {
-   requireAuth( order.name ); 
-
-   Ask ask_to_cancel;
-   assert( AsksById::get( order, ask_to_cancel ), "ask with this id does not exists" );
-
-   auto seller_account = getAccount( order.name );
-   seller_account.currency_balance += ask_to_cancel.quantity;
-   seller_account.open_orders--;
-
-   Asks::remove( ask_to_cancel );
-   save( seller_account );
-
-   print( "ask removed\n" );
-}
-
-} // namespace exchange
 
 extern "C" {
-   void init() {
-      /*
-      setAuthority( "currencya", "transfer", "anyone" );
-      setAuthority( "currencyb", "transfer", "anyone" );
-      registerHandler( "apply", "currencya", "transfer" );
-      registerHandler( "apply", "currencyb", "transfer" );
-      */
-   }
-
-//   void validate( uint64_t code, uint64_t action ) { }
-//   void precondition( uint64_t code, uint64_t action ) { }
-   /**
-    *  The apply method implements the dispatch of events to this contract
-    */
-   void apply( uint64_t code, uint64_t action ) {
-      if( code == N(exchange) ) {
-         switch( action ) {
-            case N(buy):
-               apply_exchange_buy( currentMessage<exchange::BuyOrder>() );
-               break;
-            case N(sell):
-               apply_exchange_sell( currentMessage<exchange::SellOrder>() );
-               break;
-            case N(cancelbuy):
-               apply_exchange_cancel_buy( currentMessage<exchange::OrderID>() );
-               break;
-            case N(cancelsell):
-               apply_exchange_cancel_sell( currentMessage<exchange::OrderID>() );
-               break;
-            default:
-               assert( false, "unknown action" );
-         }
-      } 
-      else if( code == N(currency) ) {
-        if( action == N(transfer) ) 
-           apply_currency_transfer( currentMessage<currency::Transfer>() );
-      } 
-      else if( code == N(eos) ) {
-        if( action == N(transfer) ) 
-           apply_eos_transfer( currentMessage<eos::Transfer>() );
-      } 
-      else {
-      }
+   [[noreturn]] void apply( uint64_t receiver, uint64_t code, uint64_t action ) {
+      eosio::exchange  ex( receiver );
+      ex.apply( code, action );
+      eosio_exit(0);
    }
 }

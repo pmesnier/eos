@@ -5,7 +5,7 @@ namespace fc {
    class path;
    struct appender_config {
       appender_config(const string& name = "",
-                      const string& type = "", 
+                      const string& type = "",
                       variant args = variant()) :
         name(name),
         type(type),

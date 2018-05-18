@@ -122,12 +122,7 @@ namespace Runtime
 
 	// Invokes a FunctionInstance with the given parameters, and returns the result.
 	// Throws a Runtime::Exception if a trap occurs.
-	Result invokeFunction(FunctionInstance* function,const std::vector<Value>& parameters);
-
-	void invokeFunction2(FunctionInstance* function,const std::vector<Value>& parameters);
-
-  void test( int a );
-	Result testPointerPass(int64_t function, int64_t test2);
+	RUNTIME_API Result invokeFunction(FunctionInstance* function,const std::vector<Value>& parameters);
 
 	// Returns the type of a FunctionInstance.
 	RUNTIME_API const IR::FunctionType* getFunctionType(FunctionInstance* function);
@@ -212,7 +207,12 @@ namespace Runtime
 
 	// Gets the default table/memory for a ModuleInstance.
 	RUNTIME_API MemoryInstance* getDefaultMemory(ModuleInstance* moduleInstance);
+	RUNTIME_API uint64_t getDefaultMemorySize(ModuleInstance* moduleInstance);
 	RUNTIME_API TableInstance* getDefaultTable(ModuleInstance* moduleInstance);
+
+	RUNTIME_API void runInstanceStartFunc(ModuleInstance* moduleInstance);
+	RUNTIME_API void resetGlobalInstances(ModuleInstance* moduleInstance);
+	RUNTIME_API void resetMemory(MemoryInstance* memory, IR::MemoryType& newMemoryType);
 
 	// Gets an object exported by a ModuleInstance by name.
 	RUNTIME_API ObjectInstance* getInstanceExport(ModuleInstance* moduleInstance,const std::string& name);

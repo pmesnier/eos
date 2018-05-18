@@ -1,4 +1,8 @@
-#include <eos/chain/wast_to_wasm.hpp>
+/**
+ *  @file
+ *  @copyright defined in eos/LICENSE.txt
+ */
+#include <eosio/chain/wast_to_wasm.hpp>
 #include <Inline/BasicTypes.h>
 #include <IR/Module.h>
 #include <IR/Validate.h>
@@ -9,7 +13,7 @@
 #include <iomanip>
 #include <fc/exception/exception.hpp>
 
-namespace eos { namespace chain {
+namespace eosio { namespace chain {
 
    std::vector<uint8_t> wast_to_wasm( const std::string& wast ) 
    { 
@@ -17,19 +21,24 @@ namespace eos { namespace chain {
       
       try {
       IR::Module module;
-      std::vector<WAST::Error> parseErrors;
-      WAST::parseModule(wast.c_str(),wast.size(),module,parseErrors);
-      if(parseErrors.size())
+      std::vector<WAST::Error> parse_errors;
+      WAST::parseModule(wast.c_str(),wast.size(),module,parse_errors);
+      if(parse_errors.size())
       {
          // Print any parse errors;
          ss << "Error parsing WebAssembly text file:" << std::endl;
-         for(auto& error : parseErrors)
+         for(auto& error : parse_errors)
          {
             ss << ":" << error.locus.describe() << ": " << error.message.c_str() << std::endl;
             ss << error.locus.sourceLine << std::endl;
             ss << std::setw(error.locus.column(8)) << "^" << std::endl;
          }
-         FC_ASSERT( !"error parsing wast", "${msg}", ("msg",ss.get()) );
+         FC_ASSERT( !"error parsing wast", "${msg}", ("msg",ss.str()) );
+      }
+
+      for(auto sectionIt = module.userSections.begin();sectionIt != module.userSections.end();++sectionIt)
+      {
+         if(sectionIt->name == "name") { module.userSections.erase(sectionIt); break; }
       }
 
       try
@@ -62,4 +71,4 @@ namespace eos { namespace chain {
    } FC_CAPTURE_AND_RETHROW() } /// wasm_to_wast
 
 
-} } // eos::chain
+} } // eosio::chain

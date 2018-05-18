@@ -1,13 +1,28 @@
-#include <eoslib/eos.hpp>
-#include <eoslib/db.hpp>
+/**
+ *  @file
+ *  @copyright defined in eos/LICENSE.txt
+ */
+#pragma once
+
+#include <eosiolib/eosio.hpp>
 
 namespace proxy {
-   struct PACKED( Config ) {
-      Config( AccountName o = AccountName() ):owner(o){}
-      const uint64_t     key = N(config);
-      AccountName        owner;
+
+   //@abi action
+   struct set_owner {
+      account_name owner;
+      uint32_t     delay;
+
+      EOSLIB_SERIALIZE( set_owner, (owner)(delay) )
    };
 
-   using Configs = Table<N(proxy),N(proxy),N(configs),Config,uint64_t>;
+   //@abi table
+   struct config {
+      config(){}
+      constexpr static uint64_t key = N(config);
+      account_name        owner = 0;
+      uint32_t            delay = 0;
+      uint32_t            next_id = 0;
+   };
 
 } /// namespace proxy

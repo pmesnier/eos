@@ -8,6 +8,7 @@
 #include <exception>
 #include <functional>
 #include <unordered_map>
+#include <boost/core/typeinfo.hpp>
 
 namespace fc
 {
@@ -100,6 +101,11 @@ namespace fc
           *   Generates a user-friendly error report.
           */
          std::string to_string( log_level ll = log_level::info  )const;
+
+         /**
+          *   Generates a user-friendly error report.
+          */
+         std::string top_message( )const;
 
          /**
           *  Throw this exception as its most derived type.
@@ -383,7 +389,7 @@ namespace fc
       fc::exception fce( \
                 FC_LOG_MESSAGE( warn, "rethrow ${what}: ", ("what",e.what())), \
                 fc::std_exception_code,\
-                typeid(e).name(), \
+                BOOST_CORE_TYPEID(e).name(), \
                 e.what() ) ; \
       wlog( "${details}", ("details",fce.to_detail_string()) ); \
       throw fce;\
@@ -404,7 +410,7 @@ namespace fc
       fc::exception fce( \
                 FC_LOG_MESSAGE( warn, "rethrow ${what}: ", FC_FORMAT_ARG_PARAMS( __VA_ARGS__ )("what",e.what())), \
                 fc::std_exception_code,\
-                typeid(e).name(), \
+                BOOST_CORE_TYPEID(e).name(), \
                 e.what() ) ; \
       wlog( "${details}", ("details",fce.to_detail_string()) ); \
       wdump( __VA_ARGS__ ); \
@@ -426,7 +432,7 @@ namespace fc
       fc::exception fce( \
                 FC_LOG_MESSAGE( warn, "rethrow ${what}: ",FC_FORMAT_ARG_PARAMS( __VA_ARGS__  )("what",e.what()) ), \
                 fc::std_exception_code,\
-                typeid(e).name(), \
+                BOOST_CORE_TYPEID(e).name(), \
                 e.what() ) ; \
       wlog( "${details}", ("details",fce.to_detail_string()) ); \
       wdump( __VA_ARGS__ ); \
@@ -436,6 +442,23 @@ namespace fc
                 std::current_exception() ); \
       wlog( "${details}", ("details",e.to_detail_string()) ); \
       wdump( __VA_ARGS__ ); \
+   }
+
+#define FC_LOG_AND_DROP( ... )  \
+   catch( fc::exception& er ) { \
+      wlog( "${details}", ("details",er.to_detail_string()) ); \
+   } catch( const std::exception& e ) {  \
+      fc::exception fce( \
+                FC_LOG_MESSAGE( warn, "rethrow ${what}: ",FC_FORMAT_ARG_PARAMS( __VA_ARGS__  )("what",e.what()) ), \
+                fc::std_exception_code,\
+                BOOST_CORE_TYPEID(e).name(), \
+                e.what() ) ; \
+      wlog( "${details}", ("details",fce.to_detail_string()) ); \
+   } catch( ... ) {  \
+      fc::unhandled_exception e( \
+                FC_LOG_MESSAGE( warn, "rethrow", FC_FORMAT_ARG_PARAMS( __VA_ARGS__) ), \
+                std::current_exception() ); \
+      wlog( "${details}", ("details",e.to_detail_string()) ); \
    }
 
 
@@ -451,7 +474,7 @@ namespace fc
       fc::exception fce( \
                 FC_LOG_MESSAGE( LOG_LEVEL, "${what}: " FORMAT,__VA_ARGS__("what",e.what())), \
                 fc::std_exception_code,\
-                typeid(e).name(), \
+                BOOST_CORE_TYPEID(e).name(), \
                 e.what() ) ; throw fce;\
    } catch( ... ) {  \
       throw fc::unhandled_exception( \
@@ -466,7 +489,7 @@ namespace fc
       fc::exception fce( \
                 FC_LOG_MESSAGE( warn, "${what}: ",FC_FORMAT_ARG_PARAMS(__VA_ARGS__)("what",e.what())), \
                 fc::std_exception_code,\
-                typeid(e).name(), \
+                BOOST_CORE_TYPEID(decltype(e)).name(), \
                 e.what() ) ; throw fce;\
    } catch( ... ) {  \
       throw fc::unhandled_exception( \

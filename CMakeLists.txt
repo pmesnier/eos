@@ -1,17 +1,29 @@
+cmake_minimum_required( VERSION 3.5 )
+
 # Defines EOS library target.
 project( EOS )
-cmake_minimum_required( VERSION 2.8.12 )
+
+enable_testing()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/libraries/fc/CMakeModules")
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/CMakeModules")
 
-INCLUDE( VersionMacros )
-INCLUDE( SetupTargetMacros )
+include( GNUInstallDirs )
+include( VersionMacros )
+include( SetupTargetMacros )
+include( InstallDirectoryPermissions )
 
 set( BLOCKCHAIN_NAME "Eos" )
 set( CMAKE_CXX_STANDARD 14 )
+set( CMAKE_CXX_EXTENSIONS ON )
+set( CXX_STANDARD_REQUIRED ON)
 
-set( CLI_CLIENT_EXECUTABLE_NAME eos_client )
-set( GUI_CLIENT_EXECUTABLE_NAME eos )
+set(VERSION_MAJOR 4)
+set(VERSION_MINOR 0)
+set(VERSION_PATCH 0)
+
+set( CLI_CLIENT_EXECUTABLE_NAME cleos )
+set( GUI_CLIENT_EXECUTABLE_NAME eosio )
 set( CUSTOM_URL_SCHEME "gcs" )
 set( INSTALLER_APP_ID "68ad7005-8eee-49c9-95ce-9eed97e5b347" )
 
@@ -26,48 +38,66 @@ elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
     endif()
 endif()
 
-list( APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/CMakeModules" )
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS "ON")
+set(BUILD_DOXYGEN FALSE CACHE BOOL "Build doxygen documentation on every make")
+set(BUILD_MONGO_DB_PLUGIN FALSE CACHE BOOL "Build mongo database plugin")
 set(EOS_EGENESIS_JSON "${CMAKE_CURRENT_SOURCE_DIR}/genesis.json" )
 
-#set (ENABLE_INSTALLER 1)
 #set (USE_PCH 1)
 
 if (USE_PCH)
   include (cotire)
 endif(USE_PCH)
 
-list( APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/libraries/fc/CMakeModules" )
+# add defaults for openssl
+if ("${OPENSSL_ROOT_DIR}" STREQUAL "")
+   if (NOT "$ENV{OPENSSL_ROOT_DIR}" STREQUAL "")
+      set(OPENSSL_ROOT_DIR $ENV{OPENSSL_ROOT_DIR})
+      set(OPENSSL_INCLUDE_DIR ${OPENSSL_ROOT_DIR}/include)
+   elseif (APPLE)
+      set(OPENSSL_ROOT_DIR "/usr/local/opt/openssl")
+      set(OPENSSL_INCLUDE_DIR "/usr/local/opt/openssl/include")
+   elseif(UNIX AND NOT APPLE)
+      set(OPENSSL_ROOT_DIR "/usr/include/openssl")
+      set(OPENSSL_INCLUDE_DIR "/usr/include/openssl/include")
+   else()
+      message(FATAL_ERROR "openssl not found and don't know where to look, please specify OPENSSL_ROOT_DIR")
+   endif()
+endif()
 
-SET(BOOST_COMPONENTS)
-LIST(APPEND BOOST_COMPONENTS thread
-                             date_time
-                             system
-                             filesystem
-                             program_options
-                             signals
-                             serialization
-                             chrono
-                             unit_test_framework
-                             context
-                             locale)
+if(UNIX)
+  if(APPLE)
+    set(whole_archive_flag "-force_load")
+    set(no_whole_archive_flag "")
+  else()
+    set(whole_archive_flag "--whole-archive")
+    set(no_whole_archive_flag "--no-whole-archive")
+  endif()
+else()
+  set(whole_archive_flag "--whole-archive")
+  set(no_whole_archive_flag "--no-whole-archive")
+endif()
+
 SET( Boost_USE_STATIC_LIBS ON CACHE STRING "ON or OFF" )
-
 IF( WIN32 )
   SET(BOOST_ROOT $ENV{BOOST_ROOT})
   set(Boost_USE_MULTITHREADED ON)
   set(BOOST_ALL_DYN_LINK OFF) # force dynamic linking for all libraries
 ENDIF(WIN32)
-
-FIND_PACKAGE(Boost 1.64 REQUIRED COMPONENTS ${BOOST_COMPONENTS})
-# For Boost 1.53 on windows, coroutine was not in BOOST_LIBRARYDIR and do not need it to build,  but if boost versin >= 1.54, find coroutine otherwise will cause link errors
-IF(NOT "${Boost_VERSION}" MATCHES "1.53(.*)")
-   SET(BOOST_LIBRARIES_TEMP ${Boost_LIBRARIES})
-   FIND_PACKAGE(Boost 1.54 REQUIRED COMPONENTS coroutine)
-   LIST(APPEND BOOST_COMPONENTS coroutine)
-   SET(Boost_LIBRARIES ${BOOST_LIBRARIES_TEMP} ${Boost_LIBRARIES})
-ENDIF()
+FIND_PACKAGE(Boost 1.66 REQUIRED COMPONENTS
+    thread
+    date_time
+    filesystem
+    system
+    program_options
+    signals
+    serialization
+    chrono
+    unit_test_framework
+    context
+    locale
+    iostreams)
 
 if( WIN32 )
 
@@ -104,28 +134,14 @@ if( WIN32 )
 
 else( WIN32 ) # Apple AND Linux
 
-    find_library(READLINE_LIBRARIES NAMES readline)
-    find_path(READLINE_INCLUDE_DIR readline/readline.h)
-    #if(NOT READLINE_INCLUDE_DIR OR NOT READLINE_LIBRARIES)
-    #  MESSAGE(FATAL_ERROR "Could not find lib readline.")
-    #endif()
-
     if( APPLE )
         # Apple Specific Options Here
         message( STATUS "Configuring Eos on OS X" )
-#set( CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} -std=c++14 -Wall -Wno-invalid-partial-specialization -Wno-deprecated-declarations" )
-        set( CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} -std=c++14 -Wall -Wno-deprecated-declarations" )
+        set( CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} -Wall -Wno-deprecated-declarations" )
     else( APPLE )
         # Linux Specific Options Here
         message( STATUS "Configuring Eos on Linux" )
         set( CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} -Wall" )
-        set( rt_library rt )
-        set( pthread_library pthread)
-        if ( NOT DEFINED crypto_library )
-          # I'm not sure why this is here, I guess someone has openssl and can't detect it with find_package()?
-          # if you have a normal install, you can define crypto_library to the empty string to avoid a build error
-          set( crypto_library crypto)
-        endif ()
         if ( FULL_STATIC_BUILD )
           set( CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libstdc++ -static-libgcc")
         endif ( FULL_STATIC_BUILD )
@@ -156,74 +172,45 @@ endif( WIN32 )
 set(ENABLE_COVERAGE_TESTING FALSE CACHE BOOL "Build Eos for code coverage analysis")
 
 if(ENABLE_COVERAGE_TESTING)
-    SET(CMAKE_CXX_FLAGS "--coverage ${CMAKE_CXX_FLAGS}")
+  SET(CMAKE_CXX_FLAGS "--coverage ${CMAKE_CXX_FLAGS}")
+  find_program( LCOV_PATH  lcov )
+  find_program( LLVMCOV_PATH  llvm-cov )
+  find_program( GENHTML_PATH NAMES genhtml)
 endif()
+
+add_subdirectory( externals )
+
+if ("${CORE_SYMBOL_NAME}" STREQUAL "")
+  set( CORE_SYMBOL_NAME "SYS" )
+endif()
+string(TOUPPER ${CORE_SYMBOL_NAME} CORE_SYMBOL_NAME)
+
+string(LENGTH ${CORE_SYMBOL_NAME} CORE_SYMBOL_NAME_LENGTH)
+if (CORE_SYMBOL_NAME_LENGTH GREATER 7)
+  message(FATAL_ERROR "CORE_SYMBOL_NAME lenght must be a between 1 and 7 characters")
+endif()
+
+message( STATUS "Using ${CORE_SYMBOL_NAME} as CORE symbol name")
 
 include(wasm)
-if(WASM_TOOLCHAIN)
-  message(STATUS "Using WASM clang => " ${WASM_CLANG})
-  message(STATUS "Using WASM llc => " ${WASM_LLC})
-  message(STATUS "Using WASM llvm-link => " ${WASM_LLVM_LINK})
-  add_subdirectory(contracts)
-else()
-  message(STATUS "--------------------------------------------------------------------")
-  message(STATUS "No WASM compiler could be found ... (skipping building of contracts)")
-  message(STATUS "--------------------------------------------------------------------")
-endif()
 
 add_subdirectory( libraries )
-add_subdirectory( programs )
+add_subdirectory( contracts )
 add_subdirectory( plugins )
+add_subdirectory( programs )
+add_subdirectory( scripts )
+add_subdirectory( unittests )
 add_subdirectory( tests )
 add_subdirectory( tools )
+add_subdirectory( debian )
 
-if (ENABLE_INSTALLER)
+install_directory_permissions(DIRECTORY ${CMAKE_INSTALL_FULL_SYSCONFDIR}/eosio)
 
-set(VERSION_MAJOR 0)
-set(VERSION_MINOR 1)
-set(VERSION_PATCH 0)
+install(FILES testnet.template DESTINATION ${CMAKE_INSTALL_FULL_SYSCONFDIR}/eosio/launcher)
+install_directory_permissions(DIRECTORY ${CMAKE_INSTALL_FULL_SYSCONFDIR}/eosio)
+install_directory_permissions(DIRECTORY ${CMAKE_INSTALL_FULL_SYSCONFDIR}/eosio/launcher)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/testnet.template ${CMAKE_CURRENT_BINARY_DIR}/etc/eosio/launcher/testnet.template COPYONLY)
 
+include(installer)
 
-include(InstallRequiredSystemLibraries)
-
-set(CPACK_OUTPUT_FILE_PREFIX ${CMAKE_BINARY_DIR}/packages)
-set(CMAKE_INSTALL_PREFIX ${CMAKE_BINARY_DIR}/install)
-
-SET(CPACK_PACKAGE_DIRECTORY "${CMAKE_INSTALL_PREFIX}")
-set(CPACK_PACKAGE_NAME "eos")
-set(CPACK_PACKAGE_VENDOR "EOSIO")
-set(CPACK_PACKAGE_VERSION_MAJOR "${VERSION_MAJOR}")
-set(CPACK_PACKAGE_VERSION_MINOR "${VERSION_MINOR}")
-set(CPACK_PACKAGE_VERSION_PATCH "${VERSION_PATCH}")
-set(CPACK_PACKAGE_VERSION "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}")
-set(CPACK_PACKAGE_DESCRIPTION "A client for the Eos network")
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "A client for the Eos network")
-set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
-set(CPACK_PACKAGE_INSTALL_DIRECTORY "Eos ${CPACK_PACKAGE_VERSION}")
-
-if(WIN32)
- SET(CPACK_GENERATOR "ZIP;NSIS")
- set(CPACK_PACKAGE_NAME "Eos") # override above
- set(CPACK_NSIS_EXECUTABLES_DIRECTORY .)
- set(CPACK_NSIS_PACKAGE_NAME "Eos v${CPACK_PACKAGE_VERSION}")
- set(CPACK_NSIS_DISPLAY_NAME "${CPACK_NSIS_PACKAGE_NAME}")
- set(CPACK_NSIS_DEFINES "  !define MUI_STARTMENUPAGE_DEFAULTFOLDER \\\"Eos\\\"")
- # it seems like windows zip files usually don't have a single directory inside them, unix tgz frequently do
- SET(CPACK_INCLUDE_TOPLEVEL_DIRECTORY 0)
-
-endif(WIN32)
-
-if(APPLE)
-  set(CPACK_GENERATOR "DragNDrop")
-endif()
-
-if(LINUX)
-  # Linux gets a .tgz
-  SET(CPACK_GENERATOR "TGZ")
-  SET(CPACK_INCLUDE_TOPLEVEL_DIRECTORY 1)
-endif(LINUX)
-
- include(CPack)
-endif(ENABLE_INSTALLER)
-
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/genesis.json ${CMAKE_CURRENT_BINARY_DIR}/genesis.json COPYONLY)
+include(doxygen)

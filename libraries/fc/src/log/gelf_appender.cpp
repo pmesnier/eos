@@ -4,7 +4,6 @@
 #include <fc/exception/exception.hpp>
 #include <fc/log/gelf_appender.hpp>
 #include <fc/reflect/variant.hpp>
-#include <fc/thread/thread.hpp>
 #include <fc/variant.hpp>
 #include <fc/io/json.hpp>
 #include <fc/crypto/city.hpp>
@@ -13,19 +12,29 @@
 #include <boost/lexical_cast.hpp>
 #include <iomanip>
 #include <iostream>
+#include <mutex>
 #include <queue>
 #include <sstream>
 #include <iostream>
+#include <boost/thread/mutex.hpp>
 
 namespace fc 
 {
+  namespace detail
+  {
+    boost::asio::ip::udp::endpoint to_asio_ep( const fc::ip::endpoint& e )
+    {
+      return boost::asio::ip::udp::endpoint(boost::asio::ip::address_v4(e.get_address()), e.port() );
+    }
+  }
 
   class gelf_appender::impl : public retainable
   {
   public:
-    config                     cfg;
-    optional<ip::endpoint>     gelf_endpoint;
-    udp_socket                 gelf_socket;
+    config                                    cfg;
+    optional<boost::asio::ip::udp::endpoint>  gelf_endpoint;
+    udp_socket                                gelf_socket;
+    boost::mutex                              gelf_log_mutex;
 
     impl(const config& c) : 
       cfg(c)
@@ -40,12 +49,16 @@ namespace fc
   gelf_appender::gelf_appender(const variant& args) :
     my(new impl(args.as<config>()))
   {
+  }
+
+  void gelf_appender::initialize(boost::asio::io_service &io_service)
+  {
     try
     {
       try
       {
         // if it's a numeric address:port, this will parse it
-        my->gelf_endpoint = ip::endpoint::from_string(my->cfg.endpoint);
+        my->gelf_endpoint = detail::to_asio_ep(ip::endpoint::from_string(my->cfg.endpoint));
       }
       catch (...)
       {
@@ -60,9 +73,9 @@ namespace fc
           uint16_t port = boost::lexical_cast<uint16_t>(my->cfg.endpoint.substr(colon_pos + 1, my->cfg.endpoint.size()));
 
           string hostname = my->cfg.endpoint.substr( 0, colon_pos );
-          std::vector<ip::endpoint> endpoints = resolve(hostname, port);
+          auto endpoints = resolve(io_service, hostname, port);
           if (endpoints.empty())
-              FC_THROW_EXCEPTION(unknown_host_exception, "The host name can not be resolved: ${hostname}", 
+              FC_THROW_EXCEPTION(unknown_host_exception, "The logging destination host name can not be resolved: ${hostname}",
                                  ("hostname", hostname));
           my->gelf_endpoint = endpoints.back();
         }
@@ -73,11 +86,15 @@ namespace fc
       }
 
       if (my->gelf_endpoint)
+      {
+        my->gelf_socket.initialize(io_service);
         my->gelf_socket.open();
+        std::cerr << "opened GELF socket to endpoint " << my->cfg.endpoint << "\n";
+      }
     }
     catch (...)
     {
-      std::cerr << "error opening GELF socket to endpoint ${endpoint}" << my->cfg.endpoint << "\n";
+      std::cerr << "error opening GELF socket to endpoint " << my->cfg.endpoint << "\n";
     }
   }
 
@@ -96,7 +113,12 @@ namespace fc
     gelf_message["host"] = my->cfg.host;
     gelf_message["short_message"] = format_string(message.get_format(), message.get_data());
     
-    gelf_message["timestamp"] = context.get_timestamp().time_since_epoch().count() / 1000000.;
+    const auto time_ns = context.get_timestamp().time_since_epoch().count();
+    gelf_message["timestamp"] = time_ns / 1000000.;
+    gelf_message["_timestamp_ns"] = time_ns;
+
+    static unsigned long gelf_log_counter;
+    gelf_message["_log_id"] = fc::to_string(++gelf_log_counter);
 
     switch (context.get_log_level())
     {
@@ -141,6 +163,8 @@ namespace fc
         gelf_message_as_string[1] == (char)0xda)
       gelf_message_as_string[1] = (char)0x9c;
     assert(gelf_message_as_string[1] == (char)0x9c);
+
+    std::unique_lock<boost::mutex> lock(my->gelf_log_mutex);
 
     // packets are sent by UDP, and they tend to disappear if they
     // get too large.  It's hard to find any solid numbers on how

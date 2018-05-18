@@ -2,9 +2,9 @@
 #INCLUDE(GetPrerequisites)
 #INCLUDE(VersionMacros)
 
-SET( DEFAULT_HEADER_INSTALL_DIR include/${target} )
-SET( DEFAULT_LIBRARY_INSTALL_DIR lib/ )
-SET( DEFAULT_EXECUTABLE_INSTALL_DIR bin/ )
+SET( DEFAULT_HEADER_INSTALL_DIR usr/include/${target} )
+SET( DEFAULT_LIBRARY_INSTALL_DIR usr/lib )
+SET( DEFAULT_EXECUTABLE_INSTALL_DIR usr/bin )
 SET( CMAKE_DEBUG_POSTFIX _debug )
 SET( BUILD_SHARED_LIBS NO )
 SET( ECC_IMPL secp256k1 CACHE STRING "secp256k1 or openssl or mixed" )
@@ -40,7 +40,6 @@ IF(NOT APPLE)
  SET(pthread_library pthread)
 ENDIF(NOT APPLE)
 
-
 IF(NOT "$ENV{OPENSSL_ROOT_DIR}" STREQUAL "")
   set(OPENSSL_ROOT_DIR $ENV{OPENSSL_ROOT_DIR} )
   set(OPENSSL_INCLUDE_DIR ${OPENSSL_ROOT_DIR}/include)
@@ -73,6 +72,7 @@ set( fc_sources
      src/log/logger.cpp
      src/log/appender.cpp
      src/log/console_appender.cpp
+     src/log/gelf_appender.cpp
      src/log/logger_config.cpp
      src/crypto/_digest_common.cpp
      src/crypto/openssl.cpp
@@ -95,8 +95,14 @@ set( fc_sources
      src/crypto/elliptic_common.cpp
      ${ECC_REST}
      src/crypto/elliptic_${ECC_IMPL}.cpp
+     src/crypto/elliptic_r1.cpp
      src/crypto/rand.cpp
+     src/crypto/public_key.cpp
+     src/crypto/private_key.cpp
+     src/crypto/signature.cpp
      src/network/ip.cpp
+     src/network/resolve.cpp
+     src/network/udp_socket.cpp
      src/network/url.cpp
      src/compress/smaz.cpp
      src/compress/zlib.cpp
@@ -112,14 +118,7 @@ set( sources
 #list(APPEND sources "${CMAKE_CURRENT_BINARY_DIR}/git_revision.cpp")
 list(APPEND sources ${fc_headers})
 
-setup_library( fc SOURCES ${sources} LIBRARY_TYPE STATIC )
-
-INSTALL( TARGETS fc
-   RUNTIME DESTINATION bin
-   LIBRARY DESTINATION lib
-   ARCHIVE DESTINATION lib
-)
-INSTALL( DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include DESTINATION . )
+setup_library( fc SOURCES ${sources} LIBRARY_TYPE STATIC DONT_INSTALL_LIBRARY )
   
 IF(APPLE)
   # As of 10.10 yosemite, the OpenSSL static libraries shipped with os x have a dependency
@@ -139,15 +138,6 @@ else()
   set( ZLIB_LIBRARIES "" )
 endif( ZLIB_FOUND )
 
-find_package( BZip2 )
-if( BZIP2_FOUND )
-   MESSAGE( STATUS "bzip2 found" )
-   add_definitions( -DHAS_BZIP2 )
-else()
-   MESSAGE( STATUS "bzip2 not found" )
-   set( BZIP2_LIBRARIES "" )
-endif( BZIP2_FOUND )
-
 # This will become unnecessary once we update to websocketpp which fixes upstream issue #395
 SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DWEBSOCKETPP_STRICT_MASKING")
 SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DBOOST_ASIO_HAS_STD_CHRONO")
@@ -158,16 +148,12 @@ target_include_directories(fc
     ${OPENSSL_INCLUDE_DIR}
     ${Secp256k1_INCLUDE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor/websocketpp
-
-  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/vendor/boost_1.51/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/vendor/cyoencode-1.0.2/src
   )
 
 IF(NOT WIN32)
   set(LINK_USR_LOCAL_LIB -L/usr/local/lib)
 ENDIF()
-target_link_libraries( fc PUBLIC ${LINK_USR_LOCAL_LIB} ${Boost_LIBRARIES} ${OPENSSL_LIBRARIES} ${ZLIB_LIBRARIES} ${BZIP2_LIBRARIES} ${PLATFORM_SPECIFIC_LIBS} ${RPCRT4} ${CMAKE_DL_LIBS} ${rt_library} ${readline_libraries} ${ECC_LIB} )
+target_link_libraries( fc PUBLIC ${LINK_USR_LOCAL_LIB} ${Boost_LIBRARIES} ${OPENSSL_LIBRARIES} ${ZLIB_LIBRARIES} ${PLATFORM_SPECIFIC_LIBS} ${RPCRT4} ${CMAKE_DL_LIBS} ${rt_library} ${readline_libraries} ${ECC_LIB} )
 
 
 SET(OPENSSL_CONF_TARGET )
@@ -176,3 +162,5 @@ IF(DEFINED CMAKE_RUNTIME_OUTPUT_DIRECTORY)
 ELSE()
   SET (OPENSSL_CONF_TARGET ${CMAKE_CURRENT_BINARY_DIR})
 ENDIF()
+
+add_subdirectory( test )

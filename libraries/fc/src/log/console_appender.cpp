@@ -11,21 +11,23 @@
 #include "console_defines.h"
 #include <fc/exception/exception.hpp>
 #include <iomanip>
-#include <sstream>
 #include <mutex>
+#include <sstream>
+
 
 namespace fc {
 
    class console_appender::impl {
    public:
      config                      cfg;
+     boost::mutex                log_mutex;
      color::type                 lc[log_level::off+1];
 #ifdef WIN32
      HANDLE                      console_handle;
 #endif
    };
 
-   console_appender::console_appender( const variant& args ) 
+   console_appender::console_appender( const variant& args )
    :my(new impl)
    {
       configure( args.as<config>() );
@@ -64,7 +66,7 @@ namespace fc {
    #ifdef WIN32
    static WORD
    #else
-   static const char* 
+   static const char*
    #endif
    get_console_color(console_appender::color::type t ) {
       switch( t ) {
@@ -79,10 +81,6 @@ namespace fc {
          default:
             return CONSOLE_DEFAULT;
       }
-   }
-
-   boost::mutex& log_mutex() {
-    static boost::mutex m; return m;
    }
 
    void console_appender::log( const log_message& m ) {
@@ -117,7 +115,7 @@ namespace fc {
       fc::string message = fc::format_string( m.get_format(), m.get_data() );
       line << message;//.c_str();
 
-      std::unique_lock<boost::mutex> lock(log_mutex());
+      std::unique_lock<boost::mutex> lock(my->log_mutex);
 
       print( line.str(), my->lc[m.get_context().get_log_level()] );
 
@@ -134,17 +132,17 @@ namespace fc {
          if (my->console_handle != INVALID_HANDLE_VALUE)
            SetConsoleTextAttribute(my->console_handle, get_console_color(text_color));
       #else
-         if(isatty(fileno(out))) fprintf( out, "\r%s", get_console_color( text_color ) );
+         if(isatty(fileno(out))) fprintf( out, "%s", get_console_color( text_color ) );
       #endif
 
       if( text.size() )
-         fprintf( out, "%s", text.c_str() ); //fmt_str.c_str() ); 
+         fprintf( out, "%s", text.c_str() ); //fmt_str.c_str() );
 
       #ifdef WIN32
       if (my->console_handle != INVALID_HANDLE_VALUE)
         SetConsoleTextAttribute(my->console_handle, CONSOLE_DEFAULT);
       #else
-      if(isatty(fileno(out))) fprintf( out, "\r%s", CONSOLE_DEFAULT );
+      if(isatty(fileno(out))) fprintf( out, "%s", CONSOLE_DEFAULT );
       #endif
 
       if( my->cfg.flush ) fflush( out );
