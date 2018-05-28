@@ -53,6 +53,7 @@ struct test_print {
   static void test_printsf();
   static void test_printdf();
   static void test_printqf();
+  static void test_print_simple();
 };
 
 struct test_action {
@@ -244,6 +245,14 @@ struct test_memory {
 struct test_checktime {
    static void checktime_pass();
    static void checktime_failure();
+   static void checktime_sha1_failure();
+   static void checktime_assert_sha1_failure();
+   static void checktime_sha256_failure();
+   static void checktime_assert_sha256_failure();
+   static void checktime_sha512_failure();
+   static void checktime_assert_sha512_failure();
+   static void checktime_ripemd160_failure();
+   static void checktime_assert_ripemd160_failure();
 };
 /*
 struct test_softfloat {

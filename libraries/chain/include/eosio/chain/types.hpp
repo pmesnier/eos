@@ -4,6 +4,7 @@
  */
 #pragma once
 #include <eosio/chain/name.hpp>
+#include <eosio/chain/chain_id_type.hpp>
 
 #include <chainbase/chainbase.hpp>
 
@@ -95,8 +96,6 @@ namespace eosio { namespace chain {
    template<typename T>
    using shared_set = boost::interprocess::set<T, std::less<T>, allocator<T>>;
 
-   using chain_id_type = fc::sha256;
-
    using action_name      = name;
    using scope_name       = name;
    using account_name     = name;
@@ -150,7 +149,7 @@ namespace eosio { namespace chain {
       resource_limits_config_object_type,
       account_history_object_type,
       action_history_object_type,
-      unconfirmed_block_object_type,
+      reversible_block_object_type,
       OBJECT_TYPE_COUNT ///< Sentry value which contains the number of different object types
    };
 
@@ -180,7 +179,6 @@ namespace eosio { namespace chain {
 
 
 } }  // eosio::chain
-
 
 FC_REFLECT_ENUM(eosio::chain::object_type,
                 (null_object_type)
@@ -220,7 +218,7 @@ FC_REFLECT_ENUM(eosio::chain::object_type,
                 (resource_limits_config_object_type)
                 (account_history_object_type)
                 (action_history_object_type)
-                (unconfirmed_block_object_type)
+                (reversible_block_object_type)
                 (OBJECT_TYPE_COUNT)
                )
 FC_REFLECT( eosio::chain::void_t, )
