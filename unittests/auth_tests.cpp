@@ -383,7 +383,7 @@ try {
    chain.create_account(acc1a);
    chain.produce_block();
 
-   chainbase::database &db = chain.control->db();
+   const chainbase::database &db = chain.control->db();
 
    using resource_usage_object = eosio::chain::resource_limits::resource_usage_object;
    using by_owner = eosio::chain::resource_limits::by_owner;
@@ -499,17 +499,15 @@ BOOST_AUTO_TEST_CASE( linkauth_special ) { try {
    );
 
    auto validate_disallow = [&] (const char *type) {
-   BOOST_REQUIRE_EXCEPTION(
-   chain.push_action(config::system_account_name, linkauth::get_name(), tester_account, fc::mutable_variant_object()
-           ("account", "tester")
-           ("code", "eosio")
-           ("type", type)
-           ("requirement", "first")),
-   action_validate_exception,
-   [] (const action_validate_exception &ex)->bool {
-      BOOST_REQUIRE_EQUAL(std::string("action exception"), ex.what());
-      return true;
-   });
+      BOOST_REQUIRE_EXCEPTION(
+         chain.push_action(config::system_account_name, linkauth::get_name(), tester_account, fc::mutable_variant_object()
+               ("account", "tester")
+               ("code", "eosio")
+               ("type", type)
+               ("requirement", "first")),
+         action_validate_exception,
+         fc_exception_message_is(std::string("Cannot link eosio::") + std::string(type) + std::string(" to a minimum permission"))
+      );
    };
 
    validate_disallow("linkauth");

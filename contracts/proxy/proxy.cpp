@@ -1,6 +1,6 @@
 /**
  *  @file
- *  @copyright defined in eos/LICENSE.txt
+ *  @copyright defined in eos/LICENSE
  */
 #include <proxy/proxy.hpp>
 #include <eosiolib/transaction.hpp>
@@ -33,7 +33,7 @@ namespace proxy {
    };
 
    template<typename T>
-   void apply_transfer(uint64_t receiver, account_name code, const T& transfer) {
+   void apply_transfer(uint64_t receiver, account_name /* code */, const T& transfer) {
       config code_config;
       const auto self = receiver;
       auto get_res = configs::get(code_config, self);

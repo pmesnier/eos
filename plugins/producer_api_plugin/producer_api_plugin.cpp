@@ -1,6 +1,6 @@
 /**
  *  @file
- *  @copyright defined in eos/LICENSE.txt
+ *  @copyright defined in eos/LICENSE
  */
 #include <eosio/producer_api_plugin/producer_api_plugin.hpp>
 #include <eosio/chain/exceptions.hpp>
@@ -72,10 +72,42 @@ void producer_api_plugin::plugin_startup() {
             INVOKE_V_V(producer, resume), 201),
        CALL(producer, producer, paused,
             INVOKE_R_V(producer, paused), 201),
+       CALL(producer, producer, get_runtime_options,
+            INVOKE_R_V(producer, get_runtime_options), 201),
+       CALL(producer, producer, update_runtime_options,
+            INVOKE_V_R(producer, update_runtime_options, producer_plugin::runtime_options), 201),
+       CALL(producer, producer, add_greylist_accounts,
+            INVOKE_V_R(producer, add_greylist_accounts, producer_plugin::greylist_params), 201),
+       CALL(producer, producer, remove_greylist_accounts,
+            INVOKE_V_R(producer, remove_greylist_accounts, producer_plugin::greylist_params), 201), 
+       CALL(producer, producer, get_greylist,
+            INVOKE_R_V(producer, get_greylist), 201),                 
+       CALL(producer, producer, get_whitelist_blacklist,
+            INVOKE_R_V(producer, get_whitelist_blacklist), 201),
+       CALL(producer, producer, set_whitelist_blacklist, 
+            INVOKE_V_R(producer, set_whitelist_blacklist, producer_plugin::whitelist_blacklist), 201),   
+       CALL(producer, producer, get_integrity_hash,
+            INVOKE_R_V(producer, get_integrity_hash), 201),
+       CALL(producer, producer, create_snapshot,
+            INVOKE_R_V(producer, create_snapshot), 201),
    });
 }
 
 void producer_api_plugin::plugin_initialize(const variables_map& options) {
+   try {
+      const auto& _http_plugin = app().get_plugin<http_plugin>();
+      if( !_http_plugin.is_on_loopback()) {
+         wlog( "\n"
+               "**********SECURITY WARNING**********\n"
+               "*                                  *\n"
+               "* --        Producer API        -- *\n"
+               "* - EXPOSED to the LOCAL NETWORK - *\n"
+               "* - USE ONLY ON SECURE NETWORKS! - *\n"
+               "*                                  *\n"
+               "************************************\n" );
+
+      }
+   } FC_LOG_AND_RETHROW()
 }
 
 

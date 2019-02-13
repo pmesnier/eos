@@ -31,16 +31,18 @@ namespace eosio { namespace chain {
 
    wasm_interface::~wasm_interface() {}
 
-   void wasm_interface::validate(const bytes& code) {
+   void wasm_interface::validate(const controller& control, const bytes& code) {
       Module module;
       try {
          Serialization::MemoryInputStream stream((U8*)code.data(), code.size());
          WASM::serialize(stream, module);
-      } catch(Serialization::FatalSerializationException& e) {
+      } catch(const Serialization::FatalSerializationException& e) {
+         EOS_ASSERT(false, wasm_serialization_error, e.message.c_str());
+      } catch(const IR::ValidationException& e) {
          EOS_ASSERT(false, wasm_serialization_error, e.message.c_str());
       }
 
-      wasm_validations::wasm_binary_validation validator(module);
+      wasm_validations::wasm_binary_validation validator(control, module);
       validator.validate();
 
       root_resolver resolver(true);
@@ -49,10 +51,14 @@ namespace eosio { namespace chain {
       //there are a couple opportunties for improvement here--
       //Easy: Cache the Module created here so it can be reused for instantiaion
       //Hard: Kick off instantiation in a separate thread at this location
-	   }
+	 }
 
    void wasm_interface::apply( const digest_type& code_id, const shared_string& code, apply_context& context ) {
       my->get_instantiated_module(code_id, code, context.trx_context)->apply(context);
+   }
+
+   void wasm_interface::exit() {
+      my->runtime_interface->immediately_exit_currently_running_module();
    }
 
    wasm_instantiated_module_interface::~wasm_instantiated_module_interface() {}
@@ -68,7 +74,7 @@ class context_aware_api {
       :context(ctx)
       {
          if( context.context_free )
-            FC_ASSERT( context_free, "only context free api's can be used in this context" );
+            EOS_ASSERT( context_free, unaccessible_api, "only context free api's can be used in this context" );
          context.used_context_free_api |= !context_free;
       }
 
@@ -86,7 +92,7 @@ class context_free_api : public context_aware_api {
       context_free_api( apply_context& ctx )
       :context_aware_api(ctx, true) {
          /* the context_free_data is not available during normal application because it is prunable */
-         FC_ASSERT( context.context_free, "this API may only be called from context_free apply" );
+         EOS_ASSERT( context.context_free, unaccessible_api, "this API may only be called from context_free apply" );
       }
 
       int get_context_free_data( uint32_t index, array_ptr<char> buffer, size_t buffer_size )const {
@@ -99,7 +105,7 @@ class privileged_api : public context_aware_api {
       privileged_api( apply_context& ctx )
       :context_aware_api(ctx)
       {
-         FC_ASSERT( context.privileged, "${code} does not have permission to call this API", ("code",context.receiver) );
+         EOS_ASSERT( context.privileged, unaccessible_api, "${code} does not have permission to call this API", ("code",context.receiver) );
       }
 
       /**
@@ -120,7 +126,7 @@ class privileged_api : public context_aware_api {
        *  Feature name should be base32 encoded name.
        */
       void activate_feature( int64_t feature_name ) {
-         FC_ASSERT( !"Unsupported Hardfork Detected" );
+         EOS_ASSERT( false, unsupported_feature, "Unsupported Hardfork Detected" );
       }
 
       /**
@@ -231,8 +237,8 @@ class softfloat_api : public context_aware_api {
          if (is_nan(b)) {
             return bf;
          }
-         if ( sign_bit(a) != sign_bit(b) ) {
-            return sign_bit(a) ? af : bf;
+         if ( f32_sign_bit(a) != f32_sign_bit(b) ) {
+            return f32_sign_bit(a) ? af : bf;
          }
          return f32_lt(a,b) ? af : bf;
       }
@@ -245,8 +251,8 @@ class softfloat_api : public context_aware_api {
          if (is_nan(b)) {
             return bf;
          }
-         if ( sign_bit(a) != sign_bit(b) ) {
-            return sign_bit(a) ? bf : af;
+         if ( f32_sign_bit(a) != f32_sign_bit(b) ) {
+            return f32_sign_bit(a) ? bf : af;
          }
          return f32_lt( a, b ) ? bf : af;
       }
@@ -398,8 +404,8 @@ class softfloat_api : public context_aware_api {
             return af;
          if (is_nan(b))
             return bf;
-         if (sign_bit(a) != sign_bit(b))
-            return sign_bit(a) ? af : bf;
+         if (f64_sign_bit(a) != f64_sign_bit(b))
+            return f64_sign_bit(a) ? af : bf;
          return f64_lt( a, b ) ? af : bf;
       }
       double _eosio_f64_max( double af, double bf ) {
@@ -409,8 +415,8 @@ class softfloat_api : public context_aware_api {
             return af;
          if (is_nan(b))
             return bf;
-         if (sign_bit(a) != sign_bit(b))
-            return sign_bit(a) ? bf : af;
+         if (f64_sign_bit(a) != f64_sign_bit(b))
+            return f64_sign_bit(a) ? bf : af;
          return f64_lt( a, b ) ? bf : af;
       }
       double _eosio_f64_copysign( double af, double bf ) {
@@ -644,32 +650,17 @@ class softfloat_api : public context_aware_api {
       }
 
       static bool is_nan( const float32_t f ) {
-         return ((f.v & 0x7FFFFFFF) > 0x7F800000);
+         return f32_is_nan( f );
       }
       static bool is_nan( const float64_t f ) {
-         return ((f.v & 0x7FFFFFFFFFFFFFFF) > 0x7FF0000000000000);
+         return f64_is_nan( f );
       }
       static bool is_nan( const float128_t& f ) {
-         return (((~(f.v[1]) & uint64_t( 0x7FFF000000000000 )) == 0) && (f.v[0] || ((f.v[1]) & uint64_t( 0x0000FFFFFFFFFFFF ))));
+         return f128_is_nan( f );
       }
-      static float32_t to_softfloat32( float f ) {
-         return *reinterpret_cast<float32_t*>(&f);
-      }
-      static float64_t to_softfloat64( double d ) {
-         return *reinterpret_cast<float64_t*>(&d);
-      }
-      static float from_softfloat32( float32_t f ) {
-         return *reinterpret_cast<float*>(&f);
-      }
-      static double from_softfloat64( float64_t d ) {
-         return *reinterpret_cast<double*>(&d);
-      }
+
       static constexpr uint32_t inv_float_eps = 0x4B000000;
       static constexpr uint64_t inv_double_eps = 0x4330000000000000;
-
-      static bool sign_bit( float32_t f ) { return f.v >> 31; }
-      static bool sign_bit( float64_t f ) { return f.v >> 63; }
-
 };
 
 class producer_api : public context_aware_api {
@@ -710,7 +701,7 @@ class crypto_api : public context_aware_api {
          fc::raw::unpack(pubds, p);
 
          auto check = fc::crypto::public_key( s, digest, false );
-         FC_ASSERT( check == p, "Error expected key different than recovered key" );
+         EOS_ASSERT( check == p, crypto_api_exception, "Error expected key different than recovered key" );
       }
 
       int recover_key( const fc::sha256& digest,
@@ -740,22 +731,22 @@ class crypto_api : public context_aware_api {
 
       void assert_sha256(array_ptr<char> data, size_t datalen, const fc::sha256& hash_val) {
          auto result = encode<fc::sha256::encoder>( data, datalen );
-         FC_ASSERT( result == hash_val, "hash mismatch" );
+         EOS_ASSERT( result == hash_val, crypto_api_exception, "hash mismatch" );
       }
 
       void assert_sha1(array_ptr<char> data, size_t datalen, const fc::sha1& hash_val) {
          auto result = encode<fc::sha1::encoder>( data, datalen );
-         FC_ASSERT( result == hash_val, "hash mismatch" );
+         EOS_ASSERT( result == hash_val, crypto_api_exception, "hash mismatch" );
       }
 
       void assert_sha512(array_ptr<char> data, size_t datalen, const fc::sha512& hash_val) {
          auto result = encode<fc::sha512::encoder>( data, datalen );
-         FC_ASSERT( result == hash_val, "hash mismatch" );
+         EOS_ASSERT( result == hash_val, crypto_api_exception, "hash mismatch" );
       }
 
       void assert_ripemd160(array_ptr<char> data, size_t datalen, const fc::ripemd160& hash_val) {
          auto result = encode<fc::ripemd160::encoder>( data, datalen );
-         FC_ASSERT( result == hash_val, "hash mismatch" );
+         EOS_ASSERT( result == hash_val, crypto_api_exception, "hash mismatch" );
       }
 
       void sha1(array_ptr<char> data, size_t datalen, fc::sha1& hash_val) {
@@ -916,15 +907,13 @@ public:
    :context_aware_api(ctx,true){}
 
    void abort() {
-      edump(("abort() called"));
-      FC_ASSERT( false, "abort() called");
+      EOS_ASSERT( false, abort_called, "abort() called");
    }
 
    // Kept as intrinsic rather than implementing on WASM side (using eosio_assert_message and strlen) because strlen is faster on native side.
    void eosio_assert( bool condition, null_terminated_ptr msg ) {
       if( BOOST_UNLIKELY( !condition ) ) {
          std::string message( msg );
-         edump((message));
          EOS_THROW( eosio_assert_message_exception, "assertion failure with message: ${s}", ("s",message) );
       }
    }
@@ -932,21 +921,19 @@ public:
    void eosio_assert_message( bool condition, array_ptr<const char> msg, size_t msg_len ) {
       if( BOOST_UNLIKELY( !condition ) ) {
          std::string message( msg, msg_len );
-         edump((message));
          EOS_THROW( eosio_assert_message_exception, "assertion failure with message: ${s}", ("s",message) );
       }
    }
 
    void eosio_assert_code( bool condition, uint64_t error_code ) {
       if( BOOST_UNLIKELY( !condition ) ) {
-         edump((error_code));
          EOS_THROW( eosio_assert_code_exception,
                     "assertion failure with error code: ${error_code}", ("error_code", error_code) );
       }
    }
 
    void eosio_exit(int32_t code) {
-      throw wasm_exit{code};
+      context.control.get_wasm_interface().exit();
    }
 
 };
@@ -1076,12 +1063,16 @@ class console_api : public context_aware_api {
             auto& console = context.get_console_stream();
             auto orig_prec = console.precision();
 
+#ifdef __x86_64__
             console.precision( std::numeric_limits<long double>::digits10 );
-
             extFloat80_t val_approx;
             f128M_to_extF80M(&val, &val_approx);
             context.console_append( *(long double*)(&val_approx) );
-
+#else
+            console.precision( std::numeric_limits<double>::digits10 );
+            double val_approx = from_softfloat64( f128M_to_f64(&val) );
+            context.console_append(val_approx);
+#endif
             console.precision( orig_prec );
          }
       }
@@ -1136,13 +1127,15 @@ class console_api : public context_aware_api {
 
 #define DB_API_METHOD_WRAPPERS_ARRAY_SECONDARY(IDX, ARR_SIZE, ARR_ELEMENT_TYPE)\
       int db_##IDX##_store( uint64_t scope, uint64_t table, uint64_t payer, uint64_t id, array_ptr<const ARR_ELEMENT_TYPE> data, size_t data_len) {\
-         FC_ASSERT( data_len == ARR_SIZE,\
+         EOS_ASSERT( data_len == ARR_SIZE,\
+                    db_api_exception,\
                     "invalid size of secondary key array for " #IDX ": given ${given} bytes but expected ${expected} bytes",\
                     ("given",data_len)("expected",ARR_SIZE) );\
          return context.IDX.store(scope, table, payer, id, data.value);\
       }\
       void db_##IDX##_update( int iterator, uint64_t payer, array_ptr<const ARR_ELEMENT_TYPE> data, size_t data_len ) {\
-         FC_ASSERT( data_len == ARR_SIZE,\
+         EOS_ASSERT( data_len == ARR_SIZE,\
+                    db_api_exception,\
                     "invalid size of secondary key array for " #IDX ": given ${given} bytes but expected ${expected} bytes",\
                     ("given",data_len)("expected",ARR_SIZE) );\
          return context.IDX.update(iterator, payer, data.value);\
@@ -1151,25 +1144,29 @@ class console_api : public context_aware_api {
          return context.IDX.remove(iterator);\
       }\
       int db_##IDX##_find_secondary( uint64_t code, uint64_t scope, uint64_t table, array_ptr<const ARR_ELEMENT_TYPE> data, size_t data_len, uint64_t& primary ) {\
-         FC_ASSERT( data_len == ARR_SIZE,\
+         EOS_ASSERT( data_len == ARR_SIZE,\
+                    db_api_exception,\
                     "invalid size of secondary key array for " #IDX ": given ${given} bytes but expected ${expected} bytes",\
                     ("given",data_len)("expected",ARR_SIZE) );\
          return context.IDX.find_secondary(code, scope, table, data, primary);\
       }\
       int db_##IDX##_find_primary( uint64_t code, uint64_t scope, uint64_t table, array_ptr<ARR_ELEMENT_TYPE> data, size_t data_len, uint64_t primary ) {\
-         FC_ASSERT( data_len == ARR_SIZE,\
+         EOS_ASSERT( data_len == ARR_SIZE,\
+                    db_api_exception,\
                     "invalid size of secondary key array for " #IDX ": given ${given} bytes but expected ${expected} bytes",\
                     ("given",data_len)("expected",ARR_SIZE) );\
          return context.IDX.find_primary(code, scope, table, data.value, primary);\
       }\
       int db_##IDX##_lowerbound( uint64_t code, uint64_t scope, uint64_t table, array_ptr<ARR_ELEMENT_TYPE> data, size_t data_len, uint64_t& primary ) {\
-         FC_ASSERT( data_len == ARR_SIZE,\
+         EOS_ASSERT( data_len == ARR_SIZE,\
+                    db_api_exception,\
                     "invalid size of secondary key array for " #IDX ": given ${given} bytes but expected ${expected} bytes",\
                     ("given",data_len)("expected",ARR_SIZE) );\
          return context.IDX.lowerbound_secondary(code, scope, table, data.value, primary);\
       }\
       int db_##IDX##_upperbound( uint64_t code, uint64_t scope, uint64_t table, array_ptr<ARR_ELEMENT_TYPE> data, size_t data_len, uint64_t& primary ) {\
-         FC_ASSERT( data_len == ARR_SIZE,\
+         EOS_ASSERT( data_len == ARR_SIZE,\
+                    db_api_exception,\
                     "invalid size of secondary key array for " #IDX ": given ${given} bytes but expected ${expected} bytes",\
                     ("given",data_len)("expected",ARR_SIZE) );\
          return context.IDX.upperbound_secondary(code, scope, table, data.value, primary);\
@@ -1279,7 +1276,12 @@ class memory_api : public context_aware_api {
       }
 
       int memcmp( array_ptr<const char> dest, array_ptr<const char> src, size_t length) {
-         return ::memcmp(dest, src, length);
+         int ret = ::memcmp(dest, src, length);
+         if(ret < 0)
+            return -1;
+         if(ret > 0)
+            return 1;
+         return 0;
       }
 
       char* memset( array_ptr<char> dest, int value, size_t length ) {
@@ -1293,7 +1295,7 @@ class transaction_api : public context_aware_api {
 
       void send_inline( array_ptr<char> data, size_t data_len ) {
          //TODO: Why is this limit even needed? And why is it not consistently checked on actions in input or deferred transactions
-         FC_ASSERT( data_len < context.control.get_global_properties().configuration.max_inline_action_size,
+         EOS_ASSERT( data_len < context.control.get_global_properties().configuration.max_inline_action_size, inline_action_too_big,
                     "inline action too big" );
 
          action act;
@@ -1303,7 +1305,7 @@ class transaction_api : public context_aware_api {
 
       void send_context_free_inline( array_ptr<char> data, size_t data_len ) {
          //TODO: Why is this limit even needed? And why is it not consistently checked on actions in input or deferred transactions
-         FC_ASSERT( data_len < context.control.get_global_properties().configuration.max_inline_action_size,
+         EOS_ASSERT( data_len < context.control.get_global_properties().configuration.max_inline_action_size, inline_action_too_big,
                    "inline action too big" );
 
          action act;
@@ -1312,11 +1314,9 @@ class transaction_api : public context_aware_api {
       }
 
       void send_deferred( const uint128_t& sender_id, account_name payer, array_ptr<char> data, size_t data_len, uint32_t replace_existing) {
-         try {
-            transaction trx;
-            fc::raw::unpack<transaction>(data, data_len, trx);
-            context.schedule_deferred_transaction(sender_id, payer, std::move(trx), replace_existing);
-         } FC_CAPTURE_AND_RETHROW((fc::to_hex(data, data_len)));
+         transaction trx;
+         fc::raw::unpack<transaction>(data, data_len, trx);
+         context.schedule_deferred_transaction(sender_id, payer, std::move(trx), replace_existing);
       }
 
       bool cancel_deferred( const unsigned __int128& val ) {
@@ -1404,7 +1404,7 @@ class compiler_builtins : public context_aware_api {
          rhs <<= 64;
          rhs |=  lb;
 
-         FC_ASSERT(rhs != 0, "divide by zero");
+         EOS_ASSERT(rhs != 0, arithmetic_exception, "divide by zero");
 
          lhs /= rhs;
 
@@ -1421,7 +1421,7 @@ class compiler_builtins : public context_aware_api {
          rhs <<= 64;
          rhs |=  lb;
 
-         FC_ASSERT(rhs != 0, "divide by zero");
+         EOS_ASSERT(rhs != 0, arithmetic_exception, "divide by zero");
 
          lhs /= rhs;
          ret = lhs;
@@ -1451,7 +1451,7 @@ class compiler_builtins : public context_aware_api {
          rhs <<= 64;
          rhs |=  lb;
 
-         FC_ASSERT(rhs != 0, "divide by zero");
+         EOS_ASSERT(rhs != 0, arithmetic_exception, "divide by zero");
 
          lhs %= rhs;
          ret = lhs;
@@ -1467,7 +1467,7 @@ class compiler_builtins : public context_aware_api {
          rhs <<= 64;
          rhs |=  lb;
 
-         FC_ASSERT(rhs != 0, "divide by zero");
+         EOS_ASSERT(rhs != 0, arithmetic_exception, "divide by zero");
 
          lhs %= rhs;
          ret = lhs;
@@ -1500,18 +1500,18 @@ class compiler_builtins : public context_aware_api {
 
       // conversion long double
       void __extendsftf2( float128_t& ret, float f ) {
-         ret = f32_to_f128( softfloat_api::to_softfloat32(f) );
+         ret = f32_to_f128( to_softfloat32(f) );
       }
       void __extenddftf2( float128_t& ret, double d ) {
-         ret = f64_to_f128( softfloat_api::to_softfloat64(d) );
+         ret = f64_to_f128( to_softfloat64(d) );
       }
       double __trunctfdf2( uint64_t l, uint64_t h ) {
          float128_t f = {{ l, h }};
-         return softfloat_api::from_softfloat64(f128_to_f64( f ));
+         return from_softfloat64(f128_to_f64( f ));
       }
       float __trunctfsf2( uint64_t l, uint64_t h ) {
          float128_t f = {{ l, h }};
-         return softfloat_api::from_softfloat32(f128_to_f32( f ));
+         return from_softfloat32(f128_to_f32( f ));
       }
       int32_t __fixtfsi( uint64_t l, uint64_t h ) {
          float128_t f = {{ l, h }};
@@ -1538,19 +1538,19 @@ class compiler_builtins : public context_aware_api {
          ret = ___fixunstfti( f );
       }
       void __fixsfti( __int128& ret, float a ) {
-         ret = ___fixsfti( softfloat_api::to_softfloat32(a).v );
+         ret = ___fixsfti( to_softfloat32(a).v );
       }
       void __fixdfti( __int128& ret, double a ) {
-         ret = ___fixdfti( softfloat_api::to_softfloat64(a).v );
+         ret = ___fixdfti( to_softfloat64(a).v );
       }
       void __fixunssfti( unsigned __int128& ret, float a ) {
-         ret = ___fixunssfti( softfloat_api::to_softfloat32(a).v );
+         ret = ___fixunssfti( to_softfloat32(a).v );
       }
       void __fixunsdfti( unsigned __int128& ret, double a ) {
-         ret = ___fixunsdfti( softfloat_api::to_softfloat64(a).v );
+         ret = ___fixunsdfti( to_softfloat64(a).v );
       }
       double __floatsidf( int32_t i ) {
-         return softfloat_api::from_softfloat64(i32_to_f64(i));
+         return from_softfloat64(i32_to_f64(i));
       }
       void __floatsitf( float128_t& ret, int32_t i ) {
          ret = i32_to_f128(i);
@@ -1898,8 +1898,8 @@ std::istream& operator>>(std::istream& in, wasm_interface::vm_type& runtime) {
    in >> s;
    if (s == "wavm")
       runtime = eosio::chain::wasm_interface::vm_type::wavm;
-   else if (s == "binaryen")
-      runtime = eosio::chain::wasm_interface::vm_type::binaryen;
+   else if (s == "wabt")
+      runtime = eosio::chain::wasm_interface::vm_type::wabt;
    else
       in.setstate(std::ios_base::failbit);
    return in;

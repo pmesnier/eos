@@ -16,8 +16,7 @@
 #include <noop/noop.wast.hpp>
 #include <noop/noop.abi.hpp>
 
-#include <eosio.system/eosio.system.wast.hpp>
-#include <eosio.system/eosio.system.abi.hpp>
+#include <fc/io/fstream.hpp>
 
 #include <Runtime/Runtime.h>
 
@@ -29,6 +28,8 @@
 
 #include <array>
 #include <utility>
+
+#include "incbin.h"
 
 #ifdef NON_VALIDATING_TEST
 #define TESTER tester
@@ -178,7 +179,7 @@ BOOST_FIXTURE_TEST_CASE( abi_from_variant, TESTER ) try {
          const auto& accnt  = this->control->db().get<account_object,by_name>( name );
          abi_def abi;
          if (abi_serializer::to_abi(accnt.abi, abi)) {
-            return abi_serializer(abi);
+            return abi_serializer(abi, abi_serializer_max_time);
          }
          return optional<abi_serializer>();
       } FC_RETHROW_EXCEPTIONS(error, "Failed to find or parse ABI for ${name}", ("name", name))
@@ -202,7 +203,7 @@ BOOST_FIXTURE_TEST_CASE( abi_from_variant, TESTER ) try {
       );
 
    signed_transaction trx;
-   abi_serializer::from_variant(pretty_trx, trx, resolver);
+   abi_serializer::from_variant(pretty_trx, trx, resolver, abi_serializer_max_time);
    set_transaction_headers(trx);
    trx.sign( get_private_key( N(asserter), "active" ), control->get_chain_id() );
    push_transaction( trx );
@@ -513,79 +514,9 @@ BOOST_FIXTURE_TEST_CASE(misaligned_tests, tester ) try {
    check_aligned(misaligned_const_ref_wast);
 } FC_LOG_AND_RETHROW()
 
-// test cpu usage
-
-/*  Comment out this test due to not being robust to changes
-BOOST_FIXTURE_TEST_CASE(cpu_usage_tests, tester ) try {
-#warning This test does not appear to be very robust.
-   create_accounts( {N(f_tests)} );
-   bool pass = false;
-
-   std::string code = R"=====(
-(module
-  (import "env" "require_auth" (func $require_auth (param i64)))
-  (import "env" "eosio_assert" (func $eosio_assert (param i32 i32)))
-   (table 0 anyfunc)
-   (memory $0 1)
-   (export "apply" (func $apply))
-   (func $test1 (param $0 i64))
-   (func $test2 (param $0 i64) (result i64) (i64.add (get_local $0) (i64.const 32)))
-   (func $apply (param $0 i64)(param $1 i64)(param $2 i64)
-   )=====";
-   for (int i = 0; i < 1024; ++i) {
-      code += "(call $test1 (call $test2(i64.const 1)))\n";
-   }
-   code += "))";
-
-   produce_blocks(1);
-   set_code(N(f_tests), code.c_str());
-   produce_blocks(10);
-
-   uint32_t start = config::default_per_signature_cpu_usage + config::default_base_per_transaction_cpu_usage;
-   start += 100 * ( config::default_base_per_action_cpu_usage
-                    + config::determine_payers_cpu_overhead_per_authorization
-                    + config::base_check_authorization_cpu_per_authorization );
-   start += config::resource_processing_cpu_overhead_per_billed_account;
-   start /= 1024;
-   start += 3077; // injected checktime amount
-   --start;
-   wdump((start));
-   uint32_t end   = start + 5;
-   uint32_t limit = start;
-   for( limit = start; limit < end; ++limit ) {
-      signed_transaction trx;
-
-      for (int i = 0; i < 100; ++i) {
-         action act;
-         act.account = N(f_tests);
-         act.name = N() + (i * 16);
-         act.authorization = vector<permission_level>{{N(f_tests),config::active_name}};
-         trx.actions.push_back(act);
-      }
-
-      set_transaction_headers(trx);
-      trx.max_cpu_usage_ms = limit++;
-      trx.sign(get_private_key( N(f_tests), "active" ), control->get_chain_id());
-
-      try {
-         push_transaction(trx);
-         produce_blocks(1);
-         BOOST_REQUIRE_EQUAL(true, chain_has_transaction(trx.id()));
-         break;
-      } catch (eosio::chain::tx_cpu_usage_exceeded &) {
-      }
-
-      BOOST_REQUIRE_EQUAL(true, validate());
-   }
-   wdump((limit));
-   BOOST_CHECK_EQUAL(true, start < limit && limit < end);
-} FC_LOG_AND_RETHROW()
-*/
-
-
 // test weighted cpu limit
 BOOST_FIXTURE_TEST_CASE(weighted_cpu_limit_tests, tester ) try {
-#warning This test does not appear to be very robust.
+// TODO Increase the robustness of this test.
    resource_limits_manager mgr = control->get_mutable_resource_limits_manager();
    create_accounts( {N(f_tests)} );
    create_accounts( {N(acc2)} );
@@ -771,7 +702,7 @@ BOOST_FIXTURE_TEST_CASE( stl_test, TESTER ) try {
     const auto& accnt  = control->db().get<account_object,by_name>( N(stltest) );
     abi_def abi;
     BOOST_REQUIRE_EQUAL(abi_serializer::to_abi(accnt.abi, abi), true);
-    abi_serializer abi_ser(abi);
+    abi_serializer abi_ser(abi, abi_serializer_max_time);
 
     //send message
     {
@@ -783,7 +714,8 @@ BOOST_FIXTURE_TEST_CASE( stl_test, TESTER ) try {
         msg_act.data = abi_ser.variant_to_binary("message", mutable_variant_object()
                                              ("from", "bob")
                                              ("to", "alice")
-                                             ("message","Hi Alice!")
+                                             ("message","Hi Alice!"),
+                                             abi_serializer_max_time
                                              );
         trx.actions.push_back(std::move(msg_act));
 
@@ -874,6 +806,113 @@ BOOST_FIXTURE_TEST_CASE( imports, TESTER ) try {
    }
 
 } FC_LOG_AND_RETHROW()
+
+BOOST_FIXTURE_TEST_CASE( nested_limit_test, TESTER ) try {
+   produce_blocks(2);
+
+   create_accounts( {N(nested)} );
+   produce_block();
+
+   // nested loops
+   {
+      std::stringstream ss;
+      ss << "(module (export \"apply\" (func $apply)) (func $apply (param $0 i64) (param $1 i64) (param $2 i64)";
+      for(unsigned int i = 0; i < 1023; ++i)
+         ss << "(loop (drop (i32.const " <<  i << "))";
+      for(unsigned int i = 0; i < 1023; ++i)
+         ss << ")";
+      ss << "))";
+      set_code(N(nested), ss.str().c_str());
+   }
+   {
+      std::stringstream ss;
+      ss << "(module (export \"apply\" (func $apply)) (func $apply (param $0 i64) (param $1 i64) (param $2 i64)";
+      for(unsigned int i = 0; i < 1024; ++i)
+         ss << "(loop (drop (i32.const " <<  i << "))";
+      for(unsigned int i = 0; i < 1024; ++i)
+         ss << ")";
+      ss << "))";
+      BOOST_CHECK_THROW(set_code(N(nested), ss.str().c_str()), eosio::chain::wasm_execution_error);
+   }
+
+   // nested blocks
+   {
+      std::stringstream ss;
+      ss << "(module (export \"apply\" (func $apply)) (func $apply (param $0 i64) (param $1 i64) (param $2 i64)";
+      for(unsigned int i = 0; i < 1023; ++i)
+         ss << "(block (drop (i32.const " <<  i << "))";
+      for(unsigned int i = 0; i < 1023; ++i)
+         ss << ")";
+      ss << "))";
+      set_code(N(nested), ss.str().c_str());
+   }
+   {
+      std::stringstream ss;
+      ss << "(module (export \"apply\" (func $apply)) (func $apply (param $0 i64) (param $1 i64) (param $2 i64)";
+      for(unsigned int i = 0; i < 1024; ++i)
+         ss << "(block (drop (i32.const " <<  i << "))";
+      for(unsigned int i = 0; i < 1024; ++i)
+         ss << ")";
+      ss << "))";
+      BOOST_CHECK_THROW(set_code(N(nested), ss.str().c_str()), eosio::chain::wasm_execution_error);
+   }
+   // nested ifs
+   {
+      std::stringstream ss;
+      ss << "(module (export \"apply\" (func $apply)) (func $apply (param $0 i64) (param $1 i64) (param $2 i64)";
+      for(unsigned int i = 0; i < 1023; ++i)
+         ss << "(if (i32.wrap/i64 (get_local $0)) (then (drop (i32.const " <<  i << "))";
+      for(unsigned int i = 0; i < 1023; ++i)
+         ss << "))";
+      ss << "))";
+      set_code(N(nested), ss.str().c_str());
+   }
+   {
+      std::stringstream ss;
+      ss << "(module (export \"apply\" (func $apply)) (func $apply (param $0 i64) (param $1 i64) (param $2 i64)";
+      for(unsigned int i = 0; i < 1024; ++i)
+         ss << "(if (i32.wrap/i64 (get_local $0)) (then (drop (i32.const " <<  i << "))";
+      for(unsigned int i = 0; i < 1024; ++i)
+         ss << "))";
+      ss << "))";
+      BOOST_CHECK_THROW(set_code(N(nested), ss.str().c_str()), eosio::chain::wasm_execution_error);
+   }
+   // mixed nested
+   {
+      std::stringstream ss;
+      ss << "(module (export \"apply\" (func $apply)) (func $apply (param $0 i64) (param $1 i64) (param $2 i64)";
+      for(unsigned int i = 0; i < 223; ++i)
+         ss << "(if (i32.wrap/i64 (get_local $0)) (then (drop (i32.const " <<  i << "))";
+      for(unsigned int i = 0; i < 400; ++i)
+         ss << "(block (drop (i32.const " <<  i << "))";
+      for(unsigned int i = 0; i < 400; ++i)
+         ss << "(loop (drop (i32.const " <<  i << "))";
+      for(unsigned int i = 0; i < 800; ++i)
+         ss << ")";
+      for(unsigned int i = 0; i < 223; ++i)
+         ss << "))";
+      ss << "))";
+      set_code(N(nested), ss.str().c_str());
+   }
+   {
+      std::stringstream ss;
+      ss << "(module (export \"apply\" (func $apply)) (func $apply (param $0 i64) (param $1 i64) (param $2 i64)";
+      for(unsigned int i = 0; i < 224; ++i)
+         ss << "(if (i32.wrap/i64 (get_local $0)) (then (drop (i32.const " <<  i << "))";
+      for(unsigned int i = 0; i < 400; ++i)
+         ss << "(block (drop (i32.const " <<  i << "))";
+      for(unsigned int i = 0; i < 400; ++i)
+         ss << "(loop (drop (i32.const " <<  i << "))";
+      for(unsigned int i = 0; i < 800; ++i)
+         ss << ")";
+      for(unsigned int i = 0; i < 224; ++i)
+         ss << "))";
+      ss << "))";
+      BOOST_CHECK_THROW(set_code(N(nested), ss.str().c_str()), eosio::chain::wasm_execution_error);
+   }
+
+} FC_LOG_AND_RETHROW()
+
 
 BOOST_FIXTURE_TEST_CASE( lotso_globals, TESTER ) try {
    produce_blocks(2);
@@ -979,7 +1018,7 @@ BOOST_FIXTURE_TEST_CASE(noop, TESTER) try {
    const auto& accnt  = control->db().get<account_object,by_name>(N(noop));
    abi_def abi;
    BOOST_REQUIRE_EQUAL(abi_serializer::to_abi(accnt.abi, abi), true);
-   abi_serializer abi_ser(abi);
+   abi_serializer abi_ser(abi, abi_serializer_max_time);
 
    {
       produce_blocks(5);
@@ -992,7 +1031,8 @@ BOOST_FIXTURE_TEST_CASE(noop, TESTER) try {
       act.data = abi_ser.variant_to_binary("anyaction", mutable_variant_object()
                                            ("from", "noop")
                                            ("type", "some type")
-                                           ("data", "some data goes here")
+                                           ("data", "some data goes here"),
+                                           abi_serializer_max_time
                                            );
 
       trx.actions.emplace_back(std::move(act));
@@ -1016,7 +1056,8 @@ BOOST_FIXTURE_TEST_CASE(noop, TESTER) try {
       act.data = abi_ser.variant_to_binary("anyaction", mutable_variant_object()
                                            ("from", "alice")
                                            ("type", "some type")
-                                           ("data", "some data goes here")
+                                           ("data", "some data goes here"),
+                                           abi_serializer_max_time
                                            );
 
       trx.actions.emplace_back(std::move(act));
@@ -1040,8 +1081,7 @@ BOOST_FIXTURE_TEST_CASE(eosio_abi, TESTER) try {
    const auto& accnt  = control->db().get<account_object,by_name>(config::system_account_name);
    abi_def abi;
    BOOST_REQUIRE_EQUAL(abi_serializer::to_abi(accnt.abi, abi), true);
-   abi_serializer abi_ser(abi);
-   abi_ser.validate();
+   abi_serializer abi_ser(abi, abi_serializer_max_time);
 
    signed_transaction trx;
    name a = N(alice);
@@ -1060,15 +1100,88 @@ BOOST_FIXTURE_TEST_CASE(eosio_abi, TESTER) try {
    fc::variant pretty_output;
    // verify to_variant works on eos native contract type: newaccount
    // see abi_serializer::to_abi()
-   abi_serializer::to_variant(*result, pretty_output, get_resolver());
+   abi_serializer::to_variant(*result, pretty_output, get_resolver(), abi_serializer_max_time);
 
    BOOST_TEST(fc::json::to_string(pretty_output).find("newaccount") != std::string::npos);
 
    produce_block();
 } FC_LOG_AND_RETHROW()
 
-BOOST_FIXTURE_TEST_CASE( test_table_key_validation, TESTER ) try {
+BOOST_FIXTURE_TEST_CASE( check_big_deserialization, TESTER ) try {
+   produce_blocks(2);
+   create_accounts( {N(cbd)} );
+   produce_block();
+
+   std::stringstream ss;
+   ss << "(module ";
+   ss << "(export \"apply\" (func $apply))";
+   ss << "  (func $apply  (param $0 i64)(param $1 i64)(param $2 i64))";
+   for(unsigned int i = 0; i < wasm_constraints::maximum_section_elements-2; i++)
+      ss << "  (func " << "$AA_" << i << ")";
+   ss << ")";
+
+   set_code(N(cbd), ss.str().c_str());
+   produce_blocks(1);
+
+   produce_blocks(1);
+
+   ss.str("");
+   ss << "(module ";
+   ss << "(export \"apply\" (func $apply))";
+   ss << "  (func $apply  (param $0 i64)(param $1 i64)(param $2 i64))";
+   for(unsigned int i = 0; i < wasm_constraints::maximum_section_elements; i++)
+      ss << "  (func " << "$AA_" << i << ")";
+   ss << ")";
+
+   BOOST_CHECK_THROW(set_code(N(cbd), ss.str().c_str()), wasm_serialization_error);
+   produce_blocks(1);
+
+   ss.str("");
+   ss << "(module ";
+   ss << "(export \"apply\" (func $apply))";
+   ss << "  (func $apply  (param $0 i64)(param $1 i64)(param $2 i64))";
+   ss << "  (func $aa ";
+   for(unsigned int i = 0; i < wasm_constraints::maximum_code_size; i++)
+      ss << "  (drop (i32.const 3))";
+   ss << "))";
+
+   BOOST_CHECK_THROW(set_code(N(cbd), ss.str().c_str()), fc::assert_exception); // this is caught first by MAX_SIZE_OF_ARRAYS check
+   produce_blocks(1);
+
+   ss.str("");
+   ss << "(module ";
+   ss << "(memory $0 1)";
+   ss << "(data (i32.const 20) \"";
+   for(unsigned int i = 0; i < wasm_constraints::maximum_func_local_bytes-1; i++)
+      ss << 'a';
+   ss << "\")";
+   ss << "(export \"apply\" (func $apply))";
+   ss << "  (func $apply  (param $0 i64)(param $1 i64)(param $2 i64))";
+   ss << "  (func $aa ";
+      ss << "  (drop (i32.const 3))";
+   ss << "))";
+
+   set_code(N(cbd), ss.str().c_str());
+   produce_blocks(1);
+
+   ss.str("");
+   ss << "(module ";
+   ss << "(memory $0 1)";
+   ss << "(data (i32.const 20) \"";
+   for(unsigned int i = 0; i < wasm_constraints::maximum_func_local_bytes; i++)
+      ss << 'a';
+   ss << "\")";
+   ss << "(export \"apply\" (func $apply))";
+   ss << "  (func $apply  (param $0 i64)(param $1 i64)(param $2 i64))";
+   ss << "  (func $aa ";
+      ss << "  (drop (i32.const 3))";
+   ss << "))";
+
+   BOOST_CHECK_THROW(set_code(N(cbd), ss.str().c_str()), wasm_serialization_error);
+   produce_blocks(1);
+
 } FC_LOG_AND_RETHROW()
+
 
 BOOST_FIXTURE_TEST_CASE( check_table_maximum, TESTER ) try {
    produce_blocks(2);
@@ -1443,6 +1556,12 @@ BOOST_FIXTURE_TEST_CASE( apply_export_and_signature, TESTER ) try {
    BOOST_CHECK_THROW(set_code(N(bbb), no_apply_wast), fc::exception);
    produce_blocks(1);
 
+   BOOST_CHECK_THROW(set_code(N(bbb), no_apply_2_wast), fc::exception);
+   produce_blocks(1);
+
+   BOOST_CHECK_THROW(set_code(N(bbb), no_apply_3_wast), fc::exception);
+   produce_blocks(1);
+
    BOOST_CHECK_THROW(set_code(N(bbb), apply_wrong_signature_wast), fc::exception);
    produce_blocks(1);
 } FC_LOG_AND_RETHROW()
@@ -1481,8 +1600,232 @@ BOOST_FIXTURE_TEST_CASE( protect_injected, TESTER ) try {
    produce_blocks(1);
 } FC_LOG_AND_RETHROW()
 
+BOOST_FIXTURE_TEST_CASE( mem_growth_memset, TESTER ) try {
+   produce_blocks(2);
 
-#warning restore net_usage_tests
+   create_accounts( {N(grower)} );
+   produce_block();
+
+   action act;
+   act.account = N(grower);
+   act.name = N();
+   act.authorization = vector<permission_level>{{N(grower),config::active_name}};
+
+   set_code(N(grower), memory_growth_memset_store);
+   {
+      signed_transaction trx;
+      trx.actions.push_back(act);
+      set_transaction_headers(trx);
+      trx.sign(get_private_key( N(grower), "active" ), control->get_chain_id());
+      push_transaction(trx);
+   }
+
+   produce_blocks(1);
+   set_code(N(grower), memory_growth_memset_test);
+   {
+      signed_transaction trx;
+      trx.actions.push_back(act);
+      set_transaction_headers(trx);
+      trx.sign(get_private_key( N(grower), "active" ), control->get_chain_id());
+      push_transaction(trx);
+   }
+} FC_LOG_AND_RETHROW()
+
+INCBIN(fuzz1, "fuzz1.wasm");
+INCBIN(fuzz2, "fuzz2.wasm");
+INCBIN(fuzz3, "fuzz3.wasm");
+INCBIN(fuzz4, "fuzz4.wasm");
+INCBIN(fuzz5, "fuzz5.wasm");
+INCBIN(fuzz6, "fuzz6.wasm");
+INCBIN(fuzz7, "fuzz7.wasm");
+INCBIN(fuzz8, "fuzz8.wasm");
+INCBIN(fuzz9, "fuzz9.wasm");
+INCBIN(fuzz10, "fuzz10.wasm");
+INCBIN(fuzz11, "fuzz11.wasm");
+INCBIN(fuzz12, "fuzz12.wasm");
+INCBIN(fuzz13, "fuzz13.wasm");
+INCBIN(fuzz14, "fuzz14.wasm");
+INCBIN(fuzz15, "fuzz15.wasm");
+//INCBIN(fuzz13, "fuzz13.wasm");
+INCBIN(big_allocation, "big_allocation.wasm");
+INCBIN(crash_section_size_too_big, "crash_section_size_too_big.wasm");
+INCBIN(leak_no_destructor, "leak_no_destructor.wasm");
+INCBIN(leak_readExports, "leak_readExports.wasm");
+INCBIN(leak_readFunctions, "leak_readFunctions.wasm");
+INCBIN(leak_readFunctions_2, "leak_readFunctions_2.wasm");
+INCBIN(leak_readFunctions_3, "leak_readFunctions_3.wasm");
+INCBIN(leak_readGlobals, "leak_readGlobals.wasm");
+INCBIN(leak_readImports, "leak_readImports.wasm");
+INCBIN(leak_wasm_binary_cpp_L1249, "leak_wasm_binary_cpp_L1249.wasm");
+INCBIN(readFunctions_slowness_out_of_memory, "readFunctions_slowness_out_of_memory.wasm");
+INCBIN(locals_yc, "locals-yc.wasm");
+INCBIN(locals_s, "locals-s.wasm");
+INCBIN(slowwasm_localsets, "slowwasm_localsets.wasm");
+INCBIN(getcode_deepindent, "getcode_deepindent.wasm");
+INCBIN(indent_mismatch, "indent-mismatch.wasm");
+INCBIN(deep_loops_ext_report, "deep_loops_ext_report.wasm");
+INCBIN(80k_deep_loop_with_ret, "80k_deep_loop_with_ret.wasm");
+INCBIN(80k_deep_loop_with_void, "80k_deep_loop_with_void.wasm");
+
+BOOST_FIXTURE_TEST_CASE( fuzz, TESTER ) try {
+   produce_blocks(2);
+
+   create_accounts( {N(fuzzy)} );
+   produce_block();
+
+   {
+      vector<uint8_t> wasm(gfuzz1Data, gfuzz1Data + gfuzz1Size);
+      BOOST_CHECK_THROW(set_code(N(fuzzy), wasm), fc::exception);
+   }
+   {
+      vector<uint8_t> wasm(gfuzz2Data, gfuzz2Data + gfuzz2Size);
+      BOOST_CHECK_THROW(set_code(N(fuzzy), wasm), fc::exception);
+   }
+   {
+      vector<uint8_t> wasm(gfuzz3Data, gfuzz3Data + gfuzz3Size);
+      BOOST_CHECK_THROW(set_code(N(fuzzy), wasm), fc::exception);
+   }
+   {
+      vector<uint8_t> wasm(gfuzz4Data, gfuzz4Data + gfuzz4Size);
+      BOOST_CHECK_THROW(set_code(N(fuzzy), wasm), fc::exception);
+   }
+   {
+      vector<uint8_t> wasm(gfuzz5Data, gfuzz5Data + gfuzz5Size);
+      BOOST_CHECK_THROW(set_code(N(fuzzy), wasm), fc::exception);
+   }
+   {
+      vector<uint8_t> wasm(gfuzz6Data, gfuzz6Data + gfuzz6Size);
+      BOOST_CHECK_THROW(set_code(N(fuzzy), wasm), fc::exception);
+   }
+   {
+      vector<uint8_t> wasm(gfuzz7Data, gfuzz7Data + gfuzz7Size);
+      BOOST_CHECK_THROW(set_code(N(fuzzy), wasm), fc::exception);
+   }
+   {
+      vector<uint8_t> wasm(gfuzz8Data, gfuzz8Data + gfuzz8Size);
+      BOOST_CHECK_THROW(set_code(N(fuzzy), wasm), fc::exception);
+   }
+   {
+      vector<uint8_t> wasm(gfuzz9Data, gfuzz9Data + gfuzz9Size);
+      BOOST_CHECK_THROW(set_code(N(fuzzy), wasm), fc::exception);
+   }
+   {
+      vector<uint8_t> wasm(gfuzz10Data, gfuzz10Data + gfuzz10Size);
+      BOOST_CHECK_THROW(set_code(N(fuzzy), wasm), fc::exception);
+   }
+   {
+      vector<uint8_t> wasm(gfuzz11Data, gfuzz11Data + gfuzz11Size);
+      BOOST_CHECK_THROW(set_code(N(fuzzy), wasm), fc::exception);
+   }
+   {
+      vector<uint8_t> wasm(gfuzz12Data, gfuzz12Data + gfuzz12Size);
+      BOOST_CHECK_THROW(set_code(N(fuzzy), wasm), fc::exception);
+   }
+   {
+      vector<uint8_t> wasm(gfuzz13Data, gfuzz13Data + gfuzz13Size);
+      BOOST_CHECK_THROW(set_code(N(fuzzy), wasm), fc::exception);
+   }
+   {
+      vector<uint8_t> wasm(gfuzz14Data, gfuzz14Data + gfuzz14Size);
+      BOOST_CHECK_THROW(set_code(N(fuzzy), wasm), fc::exception);
+   }
+      {
+      vector<uint8_t> wasm(gfuzz15Data, gfuzz15Data + gfuzz15Size);
+      BOOST_CHECK_THROW(set_code(N(fuzzy), wasm), fc::exception);
+   }
+   /*  TODO: update wasm to have apply(...) then call, claim is that this
+    *  takes 1.6 seconds under wavm...
+   {
+      auto start = fc::time_point::now();
+      vector<uint8_t> wasm(gfuzz13Data, gfuzz13Data + gfuzz13Size);
+      set_code(N(fuzzy), wasm);
+      BOOST_CHECK_THROW(set_code(N(fuzzy), wasm), fc::exception);
+      auto end = fc::time_point::now();
+      edump((end-start));
+   }
+   */
+
+   {
+      vector<uint8_t> wasm(gbig_allocationData, gbig_allocationData + gbig_allocationSize);
+      BOOST_CHECK_THROW(set_code(N(fuzzy), wasm), wasm_serialization_error);
+   }
+   {
+      vector<uint8_t> wasm(gcrash_section_size_too_bigData, gcrash_section_size_too_bigData + gcrash_section_size_too_bigSize);
+      BOOST_CHECK_THROW(set_code(N(fuzzy), wasm), wasm_serialization_error);
+   }
+   {
+      vector<uint8_t> wasm(gleak_no_destructorData, gleak_no_destructorData + gleak_no_destructorSize);
+      BOOST_CHECK_THROW(set_code(N(fuzzy), wasm), wasm_serialization_error);
+   }
+   {
+      vector<uint8_t> wasm(gleak_readExportsData, gleak_readExportsData + gleak_readExportsSize);
+      BOOST_CHECK_THROW(set_code(N(fuzzy), wasm), wasm_serialization_error);
+   }
+   {
+      vector<uint8_t> wasm(gleak_readFunctionsData, gleak_readFunctionsData + gleak_readFunctionsSize);
+      BOOST_CHECK_THROW(set_code(N(fuzzy), wasm), wasm_serialization_error);
+   }
+   {
+      vector<uint8_t> wasm(gleak_readFunctions_2Data, gleak_readFunctions_2Data + gleak_readFunctions_2Size);
+      BOOST_CHECK_THROW(set_code(N(fuzzy), wasm), wasm_serialization_error);
+   }
+   {
+      vector<uint8_t> wasm(gleak_readFunctions_3Data, gleak_readFunctions_3Data + gleak_readFunctions_3Size);
+      BOOST_CHECK_THROW(set_code(N(fuzzy), wasm), wasm_serialization_error);
+   }
+   {
+      vector<uint8_t> wasm(gleak_readGlobalsData, gleak_readGlobalsData + gleak_readGlobalsSize);
+      BOOST_CHECK_THROW(set_code(N(fuzzy), wasm), wasm_serialization_error);
+   }
+   {
+      vector<uint8_t> wasm(gleak_readImportsData, gleak_readImportsData + gleak_readImportsSize);
+      BOOST_CHECK_THROW(set_code(N(fuzzy), wasm), wasm_serialization_error);
+   }
+   {
+      vector<uint8_t> wasm(gleak_wasm_binary_cpp_L1249Data, gleak_wasm_binary_cpp_L1249Data + gleak_wasm_binary_cpp_L1249Size);
+      BOOST_CHECK_THROW(set_code(N(fuzzy), wasm), wasm_serialization_error);
+   }
+   {
+      vector<uint8_t> wasm(greadFunctions_slowness_out_of_memoryData, greadFunctions_slowness_out_of_memoryData + greadFunctions_slowness_out_of_memorySize);
+      BOOST_CHECK_THROW(set_code(N(fuzzy), wasm), wasm_serialization_error);
+   }
+   {
+      vector<uint8_t> wasm(glocals_ycData, glocals_ycData + glocals_ycSize);
+      BOOST_CHECK_THROW(set_code(N(fuzzy), wasm), wasm_serialization_error);
+   }
+   {
+      vector<uint8_t> wasm(glocals_sData, glocals_sData + glocals_sSize);
+      BOOST_CHECK_THROW(set_code(N(fuzzy), wasm), wasm_serialization_error);
+   }
+   {
+      vector<uint8_t> wasm(gslowwasm_localsetsData, gslowwasm_localsetsData + gslowwasm_localsetsSize);
+      BOOST_CHECK_THROW(set_code(N(fuzzy), wasm), wasm_serialization_error);
+   }
+   {
+      vector<uint8_t> wasm(gdeep_loops_ext_reportData, gdeep_loops_ext_reportData + gdeep_loops_ext_reportSize);
+      BOOST_CHECK_THROW(set_code(N(fuzzy), wasm), wasm_execution_error);
+   }
+   {
+      vector<uint8_t> wasm(g80k_deep_loop_with_retData, g80k_deep_loop_with_retData + g80k_deep_loop_with_retSize);
+      BOOST_CHECK_THROW(set_code(N(fuzzy), wasm), wasm_execution_error);
+   }
+   {
+      vector<uint8_t> wasm(g80k_deep_loop_with_voidData, g80k_deep_loop_with_voidData + g80k_deep_loop_with_voidSize);
+      BOOST_CHECK_THROW(set_code(N(fuzzy), wasm), wasm_execution_error);
+   }
+
+   produce_blocks(1);
+} FC_LOG_AND_RETHROW()
+
+BOOST_FIXTURE_TEST_CASE( getcode_checks, TESTER ) try {
+   vector<uint8_t> wasm(ggetcode_deepindentData, ggetcode_deepindentData + ggetcode_deepindentSize);
+   wasm_to_wast( wasm.data(), wasm.size(), true );
+   vector<uint8_t> wasmx(gindent_mismatchData, gindent_mismatchData + gindent_mismatchSize);
+   wasm_to_wast( wasmx.data(), wasmx.size(), true );
+} FC_LOG_AND_RETHROW()
+
+
+// TODO: restore net_usage_tests
 #if 0
 BOOST_FIXTURE_TEST_CASE(net_usage_tests, tester ) try {
    int count = 0;

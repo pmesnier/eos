@@ -1,9 +1,9 @@
 /**
  *  @file
- *  @copyright defined in eos/LICENSE.txt
+ *  @copyright defined in eos/LICENSE
  */
 
-#include <eosio.token/eosio.token.hpp>
+#include "eosio.token.hpp"
 
 namespace eosio {
 

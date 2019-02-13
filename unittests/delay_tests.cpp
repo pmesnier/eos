@@ -3,8 +3,6 @@
 #include <eosio/chain/producer_object.hpp>
 #include <eosio/chain/global_property_object.hpp>
 #include <eosio/chain/generated_transaction_object.hpp>
-#include <eosio.system/eosio.system.wast.hpp>
-#include <eosio.system/eosio.system.abi.hpp>
 #include <eosio.token/eosio.token.wast.hpp>
 #include <eosio.token/eosio.token.abi.hpp>
 
@@ -74,7 +72,7 @@ BOOST_FIXTURE_TEST_CASE( delay_error_create_account, validating_tester) { try {
 
    produce_blocks(6);
 
-   auto scheduled_trxs = control->get_scheduled_transactions();
+   auto scheduled_trxs = get_scheduled_transactions();
    BOOST_REQUIRE_EQUAL(scheduled_trxs.size(), 1);
    auto dtrace = control->push_scheduled_transaction(scheduled_trxs.front(), fc::time_point::maximum());
    BOOST_REQUIRE_EQUAL(dtrace->except.valid(), true);
@@ -1685,7 +1683,7 @@ BOOST_AUTO_TEST_CASE( mindelay_test ) { try {
    // send transfer with delay_sec set to 10
    const auto& acnt = chain.control->db().get<account_object,by_name>(N(eosio.token));
    const auto abi = acnt.get_abi();
-   chain::abi_serializer abis(abi);
+   chain::abi_serializer abis(abi, chain.abi_serializer_max_time);
    const auto a = chain.control->db().get<account_object,by_name>(N(eosio.token)).get_abi();
 
    string action_type_name = abis.get_action_type(name("transfer"));
@@ -1698,7 +1696,8 @@ BOOST_AUTO_TEST_CASE( mindelay_test ) { try {
       ("from", "tester")
       ("to", "tester2")
       ("quantity", "3.0000 CUR")
-      ("memo", "hi" )
+      ("memo", "hi" ),
+      chain.abi_serializer_max_time
    );
 
    signed_transaction trx;
@@ -2316,16 +2315,10 @@ BOOST_AUTO_TEST_CASE( max_transaction_delay_execute ) { try {
    chain.produce_blocks();
 
    //change max_transaction_delay to 60 sec
-   chain.control->db().modify( chain.control->get_global_properties(),
-                              [&]( auto& gprops ) {
-                                 gprops.configuration.max_transaction_delay = 60;
-                              });
-#ifndef NON_VALIDATING_TEST
-   chain.validating_node->db().modify( chain.validating_node->get_global_properties(),
-                              [&]( auto& gprops ) {
-                                 gprops.configuration.max_transaction_delay = 60;
-                              });
-#endif
+   auto params = chain.control->get_global_properties().configuration;
+   params.max_transaction_delay = 60;
+   chain.push_action( config::system_account_name, N(setparams), config::system_account_name, mutable_variant_object()
+                        ("params", params) );
 
    chain.produce_blocks();
    //should be able to create transaction with delay 60 sec, despite permission delay being 30 days, because max_transaction_delay is 60 sec

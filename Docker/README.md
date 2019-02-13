@@ -20,22 +20,22 @@ cd eos/Docker
 docker build . -t eosio/eos
 ```
 
-The above will build off the most recent commit to the master branch by default. If you would like to target a specific branch/tag, you may use a build argument. For example, if you wished to generate a docker image based off of the dawn-v4.0.0 tag, you could do the following:
+The above will build off the most recent commit to the master branch by default. If you would like to target a specific branch/tag, you may use a build argument. For example, if you wished to generate a docker image based off of the 1.6.1 tag, you could do the following:
 
 ```bash
-docker build -t eosio/eos:dawn-v4.0.0 --build-arg branch=dawn-v4.0.0 .
+docker build -t eosio/eos:v1.6.1 --build-arg branch=1.6.1 .
 ```
 
 By default, the symbol in eosio.system is set to SYS. You can override this using the symbol argument while building the docker image.
 
 ```bash
-docker built -t eosio/eos --build-arg symbol=<symbol> .
+docker build -t eosio/eos --build-arg symbol=<symbol> .
 ```
 
 ## Start nodeos docker container only
 
 ```bash
-docker run --name nodeos -p 8888:8888 -p 9876:9876 -t eosio/eos nodeosd.sh arg1 arg2
+docker run --name nodeos -p 8888:8888 -p 9876:9876 -t eosio/eos nodeosd.sh -e --http-alias=nodeos:8888 --http-alias=127.0.0.1:8888 --http-alias=localhost:8888 arg1 arg2
 ```
 
 By default, all data is persisted in a docker volume. It can be deleted if the data is outdated or corrupted:
@@ -49,7 +49,7 @@ $ docker volume rm fdc265730a4f697346fa8b078c176e315b959e79365fc9cbd11f090ea0cb5
 Alternately, you can directly mount host directory into the container
 
 ```bash
-docker run --name nodeos -v /path-to-data-dir:/opt/eosio/bin/data-dir -p 8888:8888 -p 9876:9876 -t eosio/eos nodeosd.sh arg1 arg2
+docker run --name nodeos -v /path-to-data-dir:/opt/eosio/bin/data-dir -p 8888:8888 -p 9876:9876 -t eosio/eos nodeosd.sh -e --http-alias=nodeos:8888 --http-alias=127.0.0.1:8888 --http-alias=localhost:8888 arg1 arg2
 ```
 
 ## Get chain info
@@ -73,7 +73,7 @@ After `docker-compose up -d`, two services named `nodeosd` and `keosd` will be s
 You can run the `cleos` commands via a bash alias.
 
 ```bash
-alias cleos='docker-compose exec keosd /opt/eosio/bin/cleos -u http://nodeosd:8888 --wallet-url http://localhost:8888'
+alias cleos='docker-compose exec keosd /opt/eosio/bin/cleos -u http://nodeosd:8888 --wallet-url http://localhost:8900'
 cleos get info
 cleos get account inita
 ```
@@ -81,7 +81,7 @@ cleos get account inita
 Upload sample exchange contract
 
 ```bash
-cleos set contract exchange contracts/exchange/exchange.wast contracts/exchange/exchange.abi
+cleos set contract exchange contracts/exchange/
 ```
 
 If you don't need keosd afterwards, you can stop the keosd service using
@@ -133,68 +133,26 @@ docker volume rm keosd-data-volume
 
 ### Docker Hub
 
-Docker Hub image available from [docker hub](https://hub.docker.com/r/eosio/eos/).
-Create a new `docker-compose.yaml` file with the content below
+Docker Hub images are now deprecated. New build images were discontinued on January 1st, 2019. The existing old images will be removed on June 1st, 2019.
 
-```bash
-version: "3"
+### EOSIO Testnet
 
-services:
-  nodeosd:
-    image: eosio/eos:latest
-    command: /opt/eosio/bin/nodeosd.sh
-    hostname: nodeosd
-    ports:
-      - 8888:8888
-      - 9876:9876
-    expose:
-      - "8888"
-    volumes:
-      - nodeos-data-volume:/opt/eosio/bin/data-dir
-
-  keosd:
-    image: eosio/eos:latest
-    command: /opt/eosio/bin/keosd
-    hostname: keosd
-    links:
-      - nodeosd
-    volumes:
-      - keosd-data-volume:/opt/eosio/bin/data-dir
-
-volumes:
-  nodeos-data-volume:
-  keosd-data-volume:
-
-```
-
-*NOTE:* the default version is the latest, you can change it to what you want
-
-run `docker pull eosio/eos:latest`
-
-run `docker-compose up`
-
-### Dawn 4.0 Testnet
-
-We can easily set up a Dawn 4.0 local testnet using docker images. Just run the following commands:
+We can easily set up a EOSIO local testnet using docker images. Just run the following commands:
 
 Note: if you want to use the mongo db plugin, you have to enable it in your `data-dir/config.ini` first.
 
 ```
-# pull images
-docker pull eosio/eos:latest
-docker pull mongo:latest
 # create volume
 docker volume create --name=nodeos-data-volume
 docker volume create --name=keosd-data-volume
-docker volume create --name=mongo-data-volume
-# start containers
-docker-compose -f docker-compose-dawn4.0.yaml up -d
+# pull images and start containers
+docker-compose -f docker-compose-eosio-latest.yaml up -d
 # get chain info
 curl http://127.0.0.1:8888/v1/chain/get_info
 # get logs
-docker-compose logs nodeosd
+docker-compose logs -f nodeosd
 # stop containers
-docker-compose -f docker-compose-dawn4.0.yaml down
+docker-compose -f docker-compose-eosio-latest.yaml down
 ```
 
 The `blocks` data are stored under `--data-dir` by default, and the wallet files are stored under `--wallet-dir` by default, of course you can change these as you want.

@@ -58,6 +58,8 @@
 #include <boost/asio/strand.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/ip/host_name.hpp>
+#include <boost/algorithm/string/split.hpp>
+#include <boost/algorithm/string/classification.hpp>
 
 #include <eosio/chain/plugin_interface.hpp>
 
@@ -70,6 +72,39 @@ namespace eosio {
    static appbase::abstract_plugin& _bnet_plugin = app().register_plugin<bnet_plugin>();
 
 } /// namespace eosio
+
+namespace fc {
+   extern std::unordered_map<std::string,logger>& get_logger_map();
+}
+
+const fc::string logger_name("bnet_plugin");
+fc::logger plugin_logger;
+std::string peer_log_format;
+
+#define peer_dlog( PEER, FORMAT, ... ) \
+  FC_MULTILINE_MACRO_BEGIN \
+   if( plugin_logger.is_enabled( fc::log_level::debug ) ) \
+      plugin_logger.log( FC_LOG_MESSAGE( debug, peer_log_format + FORMAT, __VA_ARGS__ (PEER->get_logger_variant()) ) ); \
+  FC_MULTILINE_MACRO_END
+
+#define peer_ilog( PEER, FORMAT, ... ) \
+  FC_MULTILINE_MACRO_BEGIN \
+   if( plugin_logger.is_enabled( fc::log_level::info ) ) \
+      plugin_logger.log( FC_LOG_MESSAGE( info, peer_log_format + FORMAT, __VA_ARGS__ (PEER->get_logger_variant()) ) ); \
+  FC_MULTILINE_MACRO_END
+
+#define peer_wlog( PEER, FORMAT, ... ) \
+  FC_MULTILINE_MACRO_BEGIN \
+   if( plugin_logger.is_enabled( fc::log_level::warn ) ) \
+      plugin_logger.log( FC_LOG_MESSAGE( warn, peer_log_format + FORMAT, __VA_ARGS__ (PEER->get_logger_variant()) ) ); \
+  FC_MULTILINE_MACRO_END
+
+#define peer_elog( PEER, FORMAT, ... ) \
+  FC_MULTILINE_MACRO_BEGIN \
+   if( plugin_logger.is_enabled( fc::log_level::error ) ) \
+      plugin_logger.log( FC_LOG_MESSAGE( error, peer_log_format + FORMAT, __VA_ARGS__ (PEER->get_logger_variant())) ); \
+  FC_MULTILINE_MACRO_END
+
 
 using eosio::public_key_type;
 using eosio::chain_id_type;
@@ -85,6 +120,7 @@ struct hello {
    public_key_type               peer_id;
    string                        network_version;
    string                        agent;
+   string                        protocol_version = "1.0.1";
    string                        user;
    string                        password;
    chain_id_type                 chain_id;
@@ -92,19 +128,23 @@ struct hello {
    uint32_t                      last_irr_block_num = 0;
    vector<block_id_type>         pending_block_ids;
 };
-FC_REFLECT( hello, (peer_id)(network_version)(user)(password)(agent)(chain_id)(request_transactions)(last_irr_block_num)(pending_block_ids) )
+FC_REFLECT( hello, (peer_id)(network_version)(user)(password)(agent)(protocol_version)(chain_id)(request_transactions)(last_irr_block_num)(pending_block_ids) )
 
+struct hello_extension_irreversible_only {};
+
+FC_REFLECT( hello_extension_irreversible_only, BOOST_PP_SEQ_NIL )
+
+using hello_extension = fc::static_variant<hello_extension_irreversible_only>;
 
 /**
  * This message is sent upon successful speculative application of a transaction
  * and informs a peer not to send this message.
  */
 struct trx_notice {
-   sha256                signed_trx_id; ///< hash of trx + sigs
-   fc::time_point_sec    expiration; ///< expiration of trx
+   vector<sha256>  signed_trx_id; ///< hash of trx + sigs
 };
 
-FC_REFLECT( trx_notice, (signed_trx_id)(expiration) )
+FC_REFLECT( trx_notice, (signed_trx_id) )
 
 /**
  *  This message is sent upon successfully adding a transaction to the fork database
@@ -147,6 +187,14 @@ namespace eosio {
   using namespace chain::plugin_interface;
 
   class bnet_plugin_impl;
+
+  template <typename Strand>
+  void verify_strand_in_this_thread(const Strand& strand, const char* func, int line) {
+     if( !strand.running_in_this_thread() ) {
+        elog( "wrong strand: ${f} : line ${n}, exiting", ("f", func)("n", line) );
+        app().quit();
+     }
+  }
 
   /**
    *  Each session is presumed to operate in its own strand so that
@@ -205,12 +253,9 @@ namespace eosio {
            >
         > transaction_status_index;
 
-        auto get_status( block_id_type id ) {
-           return _block_status.find( id );
-        }
-
         block_status_index        _block_status;
         transaction_status_index  _transaction_status;
+        const uint32_t            _max_block_status_range = 2048; // limit tracked block_status known_by_peer
 
         public_key_type    _local_peer_id;
         uint32_t           _local_lib             = 0;
@@ -223,6 +268,7 @@ namespace eosio {
         uint32_t           _remote_lib            = 0;
         block_id_type      _remote_lib_id;
         bool               _remote_request_trx    = false;
+        bool               _remote_request_irreversible_only = false;
 
         uint32_t           _last_sent_block_num   = 0;
         block_id_type      _last_sent_block_id; /// the id of the last block sent
@@ -239,7 +285,7 @@ namespace eosio {
         int                                                            _session_num = 0;
         session_state                                                  _state = hello_state;
         tcp::resolver                                                  _resolver;
-        bnet_plugin_impl&                                              _net_plugin;
+        bnet_ptr                                                       _net_plugin;
         boost::asio::io_service&                                       _ios;
         unique_ptr<ws::stream<tcp::socket>>                            _ws;
         boost::asio::strand< boost::asio::io_context::executor_type>   _strand;
@@ -256,18 +302,20 @@ namespace eosio {
         //boost::beast::multi_buffer                                  _in_buffer;
         boost::beast::flat_buffer                                     _in_buffer;
         flat_set<block_id_type>                                       _block_header_notices;
+        fc::optional<fc::variant_object>                              _logger_variant;
+
 
         int next_session_id()const {
-           static int session_count = 0;
+           static std::atomic<int> session_count(0);
            return ++session_count;
         }
 
         /**
          * Creating session from server socket acceptance
          */
-        explicit session( tcp::socket socket, bnet_plugin_impl& net_plug )
+        explicit session( tcp::socket socket, bnet_ptr net_plug )
         :_resolver(socket.get_io_service()),
-         _net_plugin( net_plug ),
+         _net_plugin( std::move(net_plug) ),
          _ios(socket.get_io_service()),
          _ws( new ws::stream<tcp::socket>(move(socket)) ),
          _strand(_ws->get_executor() ),
@@ -284,9 +332,9 @@ namespace eosio {
         /**
          * Creating outgoing session
          */
-        explicit session( boost::asio::io_context& ioc, bnet_plugin_impl& net_plug )
+        explicit session( boost::asio::io_context& ioc, bnet_ptr net_plug )
         :_resolver(ioc),
-         _net_plugin( net_plug ),
+         _net_plugin( std::move(net_plug) ),
          _ios(ioc),
          _ws( new ws::stream<tcp::socket>(ioc) ),
          _strand( _ws->get_executor() ),
@@ -393,7 +441,7 @@ namespace eosio {
            if( itr != _transaction_status.end() ) {
               if( !itr->known_by_peer() ) {
                  _transaction_status.modify( itr, [&]( auto& stat ) {
-                    stat.expired = std::min<fc::time_point>( fc::time_point::now() + fc::seconds(5), t->trx.expiration );
+                    stat.expired = std::min<fc::time_point>( fc::time_point::now() + fc::seconds(5), t->packed_trx->expiration() );
                  });
               }
               return;
@@ -427,7 +475,7 @@ namespace eosio {
          *  the LIB or up to the last block known by the remote peer.
          */
         void on_new_lib( block_state_ptr s ) {
-           if( !_strand.running_in_this_thread() ) { elog( "wrong strand" ); }
+           verify_strand_in_this_thread(_strand, __func__, __LINE__);
            _local_lib = s->block_num;
            _local_lib_id = s->id;
 
@@ -439,17 +487,26 @@ namespace eosio {
               idx.erase(itr);
               itr = idx.begin();
            }
+
+           if( _remote_request_irreversible_only ) {
+              auto bitr = _block_status.find(s->id);
+              if ( bitr == _block_status.end() || !bitr->received_from_peer ) {
+                 _block_header_notices.insert(s->id);
+              }
+           }
+
            maybe_send_next_message();
         }
 
 
         void on_bad_block( signed_block_ptr b ) {
-           if( !_strand.running_in_this_thread() ) { elog( "wrong strand" ); }
+           verify_strand_in_this_thread(_strand, __func__, __LINE__);
            try {
               auto id = b->id();
               auto itr = _block_status.find( id );
               if( itr == _block_status.end() ) return;
               if( itr->received_from_peer ) {
+                 peer_elog(this, "bad signed_block_ptr : unknown" );
                  elog( "peer sent bad block #${b} ${i}, disconnect", ("b", b->block_num())("i",b->id())  );
                  _ws->next_layer().close();
               }
@@ -459,27 +516,28 @@ namespace eosio {
         }
 
         void on_accepted_block_header( const block_state_ptr& s ) {
-           if( !_strand.running_in_this_thread() ) { elog( "wrong strand" ); }
+           verify_strand_in_this_thread(_strand, __func__, __LINE__);
           // ilog( "accepted block header ${n}", ("n",s->block_num) );
+           const auto& id = s->id;
+
            if( fc::time_point::now() - s->block->timestamp  < fc::seconds(6) ) {
            //   ilog( "queue notice to peer that we have this block so hopefully they don't send it to us" );
-              auto itr = _block_status.find(s->id);
-              if( itr == _block_status.end() || !itr->received_from_peer ) {
-                 _block_header_notices.insert(s->id);
+              auto itr = _block_status.find( id );
+              if( !_remote_request_irreversible_only && ( itr == _block_status.end() || !itr->received_from_peer ) ) {
+                 _block_header_notices.insert( id );
+              }
+              if( itr == _block_status.end() ) {
+                 _block_status.insert( block_status(id, false, false) );
               }
            }
         }
 
         void on_accepted_block( const block_state_ptr& s ) {
-           if( !_strand.running_in_this_thread() ) { elog( "wrong strand" ); }
+           verify_strand_in_this_thread(_strand, __func__, __LINE__);
            //idump((_block_status.size())(_transaction_status.size()));
-           auto id = s->id;
            //ilog( "accepted block ${n}", ("n",s->block_num) );
 
-           auto itr = _block_status.find( id );
-           if( itr == _block_status.end() ) {
-              itr = _block_status.insert( block_status(id, false, false) ).first;
-           }
+           const auto& id = s->id;
 
            _local_head_block_id = id;
            _local_head_block_num = block_header::num_from_id(id);
@@ -496,8 +554,9 @@ namespace eosio {
             */
            for( const auto& receipt : s->block->transactions ) {
               if( receipt.trx.which() == 1 ) {
-                 auto id = receipt.trx.get<packed_transaction>().id();
-                 auto itr = _transaction_status.find( id );
+                 const auto& pt = receipt.trx.get<packed_transaction>();
+                 const auto& tid = pt.id();
+                 auto itr = _transaction_status.find( tid );
                  if( itr != _transaction_status.end() )
                     _transaction_status.erase(itr);
               }
@@ -513,7 +572,7 @@ namespace eosio {
            _app_ios.post( [self = shared_from_this(),callback]{
               auto& control = app().get_plugin<chain_plugin>().chain();
               auto lib = control.last_irreversible_block_num();
-              auto head = control.head_block_id();
+              auto head = control.fork_db_head_block_id();
               auto head_num = block_header::num_from_id(head);
 
 
@@ -558,12 +617,27 @@ namespace eosio {
 
 
         void send( const bnet_message& msg ) { try {
-           if( !_strand.running_in_this_thread() ) { elog( "wrong strand" ); }
-
            auto ps = fc::raw::pack_size(msg);
            _out_buffer.resize(ps);
            fc::datastream<char*> ds(_out_buffer.data(), ps);
            fc::raw::pack(ds, msg);
+           send();
+        } FC_LOG_AND_RETHROW() }
+
+        template<class T>
+        void send( const bnet_message& msg, const T& ex ) { try {
+           auto ex_size = fc::raw::pack_size(ex);
+           auto ps = fc::raw::pack_size(msg) + fc::raw::pack_size(unsigned_int(ex_size)) + ex_size;
+           _out_buffer.resize(ps);
+           fc::datastream<char*> ds(_out_buffer.data(), ps);
+           fc::raw::pack( ds, msg );
+           fc::raw::pack( ds, unsigned_int(ex_size) );
+           fc::raw::pack( ds, ex );
+           send();
+        } FC_LOG_AND_RETHROW() }
+
+        void send() { try {
+           verify_strand_in_this_thread(_strand, __func__, __LINE__);
 
            _state = sending_state;
            _ws->async_write( boost::asio::buffer(_out_buffer),
@@ -575,28 +649,23 @@ namespace eosio {
                                           std::placeholders::_2 ) ) );
         } FC_LOG_AND_RETHROW() }
 
-        void mark_block_known_by_peer( block_id_type id) {
-            auto itr = _block_status.find(id);
-            if( itr == _block_status.end() ) {
-               _block_status.insert( block_status(id, true, false) );
-            } else {
-               _block_status.modify( itr, [&]( auto& item ) {
-                 item.known_by_peer = true;
-               });
-            }
+        void mark_block_status( const block_id_type& id, bool known_by_peer, bool recv_from_peer ) {
+           auto itr = _block_status.find(id);
+           if( itr == _block_status.end() ) {
+              // optimization to avoid sending blocks to nodes that already know about them
+              // to avoid unbounded memory growth limit number tracked
+              const auto min_block_num = std::min( _local_lib, _last_sent_block_num );
+              const auto max_block_num = min_block_num + _max_block_status_range;
+              const auto block_num = block_header::num_from_id( id );
+              if( block_num > min_block_num && block_num < max_block_num && _block_status.size() < _max_block_status_range )
+                 _block_status.insert( block_status( id, known_by_peer, recv_from_peer ) );
+           } else {
+              _block_status.modify( itr, [&]( auto& item ) {
+                 item.known_by_peer = known_by_peer;
+                 if (recv_from_peer) item.received_from_peer = true;
+              });
+           }
         }
-        void mark_block_recv_from_peer( block_id_type id ) {
-            auto itr = _block_status.find(id);
-            if( itr == _block_status.end() ) {
-               _block_status.insert( block_status(id, true, true) );
-            } else {
-               _block_status.modify( itr, [&]( auto& item ) {
-                 item.known_by_peer = true;
-                 item.received_from_peer = true;
-               });
-            }
-        }
-
 
         /**
          *  This method will determine whether there is a message in the
@@ -604,7 +673,7 @@ namespace eosio {
          *  message to send.
          */
         void maybe_send_next_message() {
-           if( !_strand.running_in_this_thread() ) { elog( "wrong strand" ); }
+           verify_strand_in_this_thread(_strand, __func__, __LINE__);
            if( _state == sending_state ) return; /// in process of sending
            if( _out_buffer.size() ) return; /// in process of sending
            if( !_recv_remote_hello || !_sent_remote_hello ) return;
@@ -614,6 +683,9 @@ namespace eosio {
            if( send_block_notice() ) return;
            if( send_pong() ) return;
            if( send_ping() ) return;
+
+           /// we don't know where we are (waiting on accept block localhost)
+           if( _local_head_block_id == block_id_type() ) return ;
            if( send_next_block() ) return;
            if( send_next_trx() ) return;
         }
@@ -692,7 +764,7 @@ namespace eosio {
               return false;
 
 
-           auto ptrx_ptr = std::make_shared<packed_transaction>( start->trx->packed_trx );
+           auto ptrx_ptr = start->trx->packed_trx;
 
            idx.modify( start, [&]( auto& stat ) {
               stat.mark_known_by_peer();
@@ -706,7 +778,7 @@ namespace eosio {
         } FC_LOG_AND_RETHROW() }
 
         void on_async_get_block( const signed_block_ptr& nextblock ) {
-           if( !_strand.running_in_this_thread() ) { elog( "wrong strand" ); }
+           verify_strand_in_this_thread(_strand, __func__, __LINE__);
             if( !nextblock)  {
                _state = idle_state;
                maybe_send_next_message();
@@ -715,7 +787,7 @@ namespace eosio {
 
             /// if something changed, the next block doesn't link to the last
             /// block we sent, local chain must have switched forks
-            if( nextblock->previous != _last_sent_block_id ) {
+            if( nextblock->previous != _last_sent_block_id && _last_sent_block_id != block_id_type() ) {
                 if( !is_known_by_peer( nextblock->previous ) ) {
                   _last_sent_block_id  = _local_lib_id;
                   _last_sent_block_num = _local_lib;
@@ -740,7 +812,7 @@ namespace eosio {
                return;
             }
 
-            mark_block_known_by_peer( next_id );
+            mark_block_status( next_id, true, false );
 
             _last_sent_block_id  = next_id;
             _last_sent_block_num = nextblock->block_num();
@@ -759,6 +831,10 @@ namespace eosio {
          */
         bool send_next_block() {
 
+           if ( _remote_request_irreversible_only && _last_sent_block_id == _local_lib_id ) {
+              return false;
+           }
+
            if( _last_sent_block_id == _local_head_block_id ) /// we are caught up
               return false;
 
@@ -774,7 +850,7 @@ namespace eosio {
 
         void on_fail( boost::system::error_code ec, const char* what ) {
            try {
-              if( !_strand.running_in_this_thread() ) { elog( "wrong strand" ); }
+              verify_strand_in_this_thread(_strand, __func__, __LINE__);
               elog( "${w}: ${m}", ("w", what)("m", ec.message() ) );
               _ws->next_layer().close();
            } catch ( ... ) {
@@ -818,8 +894,8 @@ namespace eosio {
 
               bnet_message msg;
               fc::raw::unpack( ds, msg );
+              on_message( msg, ds );
               _in_buffer.consume( ds.tellp() );
-              on_message( msg );
 
               wait_on_app();
               return;
@@ -847,11 +923,11 @@ namespace eosio {
             );
         }
 
-        void on_message( const bnet_message& msg ) {
+        void on_message( const bnet_message& msg, fc::datastream<const char*>& ds ) {
            try {
               switch( msg.which() ) {
                  case bnet_message::tag<hello>::value:
-                    on( msg.get<hello>() );
+                    on( msg.get<hello>(), ds );
                     break;
                  case bnet_message::tag<block_notice>::value:
                     on( msg.get<block_notice>() );
@@ -881,43 +957,26 @@ namespace eosio {
         }
 
         void on( const block_notice& notice ) {
+           peer_ilog(this, "received block_notice");
            for( const auto& id : notice.block_ids ) {
               status( "received notice " + std::to_string( block_header::num_from_id(id) ) );
-              mark_block_known_by_peer( id );
+              mark_block_status( id, true, false );
            }
         }
 
-        void on( const hello& hi ) {
-           _recv_remote_hello     = true;
-
-           if( hi.chain_id != app().get_plugin<chain_plugin>().get_chain_id() ) { // TODO: Quick fix in a rush. Maybe a better solution is needed.
-              return do_goodbye( "disconnecting due to wrong chain id" );
-           }
-
-           if( hi.peer_id == _local_peer_id ) {
-              return do_goodbye( "connected to self" );
-           }
-
-           _last_sent_block_num   = hi.last_irr_block_num;
-           _remote_request_trx    = hi.request_transactions;
-           _remote_peer_id        = hi.peer_id;
-           _remote_lib            = hi.last_irr_block_num;
-
-           for( const auto& id : hi.pending_block_ids )
-              mark_block_known_by_peer( id );
-
-           check_for_redundant_connection();
-        }
-
+        void on( const hello& hi, fc::datastream<const char*>& ds );
 
         void on( const ping& p ) {
+           peer_ilog(this, "received ping");
            _last_recv_ping = p;
            _remote_lib     = p.lib;
            _last_recv_ping_time = fc::time_point::now();
         }
 
         void on( const pong& p ) {
+           peer_ilog(this, "received pong");
            if( p.code != _last_sent_ping.code ) {
+              peer_elog(this, "bad ping : invalid pong code");
               return do_goodbye( "invalid pong code" );
            }
            _last_sent_ping.code = fc::sha256();
@@ -935,10 +994,15 @@ namespace eosio {
         void check_for_redundant_connection();
 
         void on( const signed_block_ptr& b ) {
+           peer_ilog(this, "received signed_block_ptr");
+           if (!b) {
+              peer_elog(this, "bad signed_block_ptr : null pointer");
+              EOS_THROW(block_validate_exception, "bad block" );
+           }
            status( "received block " + std::to_string(b->block_num()) );
            //ilog( "recv block ${n}", ("n", b->block_num()) );
            auto id = b->id();
-           mark_block_recv_from_peer( id );
+           mark_block_status( id, true, true );
 
            app().get_channel<incoming::channels::block>().publish(b);
 
@@ -948,7 +1012,8 @@ namespace eosio {
         void mark_block_transactions_known_by_peer( const signed_block_ptr& b ) {
            for( const auto& receipt : b->transactions ) {
               if( receipt.trx.which() == 1 ) {
-                 auto id = receipt.trx.get<packed_transaction>().id();
+                 const auto& pt = receipt.trx.get<packed_transaction>();
+                 const auto& id = pt.id();
                  mark_transaction_known_by_peer(id);
               }
            }
@@ -974,20 +1039,11 @@ namespace eosio {
            return false;
         }
 
-        void on( const packed_transaction_ptr& p ) {
-           auto id = p->id();
-          // ilog( "recv trx ${n}", ("n", id) );
-           if( p->expiration() < fc::time_point::now() ) return;
-
-           if( mark_transaction_known_by_peer( id ) )
-              return;
-
-           app().get_channel<incoming::channels::transaction>().publish(p);
-        }
+        void on( const packed_transaction_ptr& p );
 
         void on_write( boost::system::error_code ec, std::size_t bytes_transferred ) {
            boost::ignore_unused(bytes_transferred);
-           if( !_strand.running_in_this_thread() ) { elog( "wrong strand" ); }
+           verify_strand_in_this_thread(_strand, __func__, __LINE__);
            if( ec ) {
               _ws->next_layer().close();
               return on_fail( ec, "write" );
@@ -1000,6 +1056,29 @@ namespace eosio {
         void status( const string& msg ) {
         //   ilog( "${remote_peer}: ${msg}", ("remote_peer",fc::variant(_remote_peer_id).as_string().substr(3,5) )("msg",msg) );
         }
+
+        const fc::variant_object& get_logger_variant()  {
+           if (!_logger_variant) {
+              boost::system::error_code ec;
+              auto rep = _ws->lowest_layer().remote_endpoint(ec);
+              string ip = ec ? "<unknown>" : rep.address().to_string();
+              string port = ec ? "<unknown>" : std::to_string(rep.port());
+
+              auto lep = _ws->lowest_layer().local_endpoint(ec);
+              string lip = ec ? "<unknown>" : lep.address().to_string();
+              string lport = ec ? "<unknown>" : std::to_string(lep.port());
+
+              _logger_variant.emplace(fc::mutable_variant_object()
+                 ("_name", _peer)
+                 ("_id", _remote_peer_id)
+                 ("_ip", ip)
+                 ("_port", port)
+                 ("_lip", lip)
+                 ("_lport", lport)
+              );
+           }
+           return *_logger_variant;
+        }
   };
 
 
@@ -1010,11 +1089,11 @@ namespace eosio {
      private:
         tcp::acceptor         _acceptor;
         tcp::socket           _socket;
-        bnet_plugin_impl&     _net_plugin;
+        bnet_ptr              _net_plugin;
 
      public:
-        listener( boost::asio::io_context& ioc, tcp::endpoint endpoint, bnet_plugin_impl& np  )
-        :_acceptor(ioc), _socket(ioc),_net_plugin(np)
+        listener( boost::asio::io_context& ioc, tcp::endpoint endpoint, bnet_ptr np  )
+        :_acceptor(ioc), _socket(ioc), _net_plugin(std::move(np))
         {
            boost::system::error_code ec;
 
@@ -1031,7 +1110,7 @@ namespace eosio {
         }
 
         void run() {
-           FC_ASSERT( _acceptor.is_open(), "unable top open listen socket" );
+           EOS_ASSERT( _acceptor.is_open(), plugin_exception, "unable top open listen socket" );
            do_accept();
         }
 
@@ -1049,26 +1128,23 @@ namespace eosio {
 
    class bnet_plugin_impl : public std::enable_shared_from_this<bnet_plugin_impl> {
       public:
-         bnet_plugin_impl() {
-            _peer_pk = fc::crypto::private_key::generate();
-            _peer_id = _peer_pk.get_public_key();
-         }
+         bnet_plugin_impl() = default;
 
-         string                                         _bnet_endpoint_address = "0.0.0.0";
-         uint16_t                                       _bnet_endpoint_port = 4321;
-         bool                                           _request_trx = true;
-         public_key_type                                _peer_id;
-         private_key_type                               _peer_pk; /// one time random key to identify this process
+         const private_key_type  _peer_pk = fc::crypto::private_key::generate(); /// one time random key to identify this process
+         public_key_type         _peer_id = _peer_pk.get_public_key();
+         string                                                 _bnet_endpoint_address = "0.0.0.0";
+         uint16_t                                               _bnet_endpoint_port = 4321;
+         bool                                                   _request_trx = true;
+         bool                                                   _follow_irreversible = false;
 
+         std::vector<std::string>                               _connect_to_peers; /// list of peers to connect to
+         std::vector<std::thread>                               _socket_threads;
+         int32_t                                                _num_threads = 1;
 
-         std::vector<std::string>                       _connect_to_peers; /// list of peers to connect to
-         std::vector<std::thread>                       _socket_threads;
-         int32_t                                        _num_threads = 1;
-         std::unique_ptr<boost::asio::io_context>       _ioc;
-         std::shared_ptr<listener>                      _listener;
-         std::shared_ptr<boost::asio::deadline_timer>   _timer;
-
-         std::map<const session*, std::weak_ptr<session> > _sessions;
+         std::unique_ptr<boost::asio::io_context>               _ioc; // lifetime guarded by shared_ptr of bnet_plugin_impl
+         std::shared_ptr<listener>                              _listener;
+         std::shared_ptr<boost::asio::deadline_timer>           _timer;    // only access on app io_service
+         std::map<const session*, std::weak_ptr<session> >      _sessions; // only access on app io_service
 
          channels::irreversible_block::channel_type::handle     _on_irb_handle;
          channels::accepted_block::channel_type::handle         _on_accepted_block_handle;
@@ -1085,6 +1161,7 @@ namespace eosio {
          }
 
          void on_session_close( const session* s ) {
+            verify_strand_in_this_thread(app().get_io_service().get_executor(), __func__, __LINE__);
             auto itr = _sessions.find(s);
             if( _sessions.end() != itr )
                _sessions.erase(itr);
@@ -1092,18 +1169,20 @@ namespace eosio {
 
          template<typename Call>
          void for_each_session( Call callback ) {
-            for( const auto& item : _sessions ) {
-               if( auto ses = item.second.lock() ) {
-                  ses->_ios.post( boost::asio::bind_executor(
-                                        ses->_strand,
-                                        [ses,cb=callback](){ cb(ses); }
-                                    ));
+            app().get_io_service().post([this, callback = callback] {
+               for (const auto& item : _sessions) {
+                  if (auto ses = item.second.lock()) {
+                     ses->_ios.post(boost::asio::bind_executor(
+                           ses->_strand,
+                           [ses, cb = callback]() { cb(ses); }
+                     ));
+                  }
                }
-            }
+            });
          }
 
          void on_accepted_transaction( transaction_metadata_ptr trx ) {
-            if( trx->trx.signatures.size() == 0 ) return;
+            if( trx->implicit || trx->scheduled ) return;
             for_each_session( [trx]( auto ses ){ ses->on_accepted_transaction( trx ); } );
          }
 
@@ -1146,6 +1225,7 @@ namespace eosio {
          };
 
          void on_reconnect_peers() {
+             verify_strand_in_this_thread(app().get_io_service().get_executor(), __func__, __LINE__);
              for( const auto& peer : _connect_to_peers ) {
                 bool found = false;
                 for( const auto& con : _sessions ) {
@@ -1158,7 +1238,7 @@ namespace eosio {
 
                 if( !found ) {
                    wlog( "attempt to connect to ${p}", ("p",peer) );
-                   auto s = std::make_shared<session>( *_ioc, std::ref(*this) );
+                   auto s = std::make_shared<session>( *_ioc, shared_from_this() );
                    s->_local_peer_id = _peer_id;
                    _sessions[s.get()] = s;
                    s->run( peer );
@@ -1183,12 +1263,24 @@ namespace eosio {
 
    void listener::on_accept( boost::system::error_code ec ) {
      if( ec ) {
+        if( ec == boost::system::errc::too_many_files_open )
+           do_accept();
         return;
      }
-     auto newsession = std::make_shared<session>( move( _socket ), std::ref(_net_plugin) );
-     _net_plugin.async_add_session( newsession );
-     newsession->_local_peer_id = _net_plugin._peer_id;
-     newsession->run();
+     std::shared_ptr<session> newsession;
+     try {
+        newsession = std::make_shared<session>( move( _socket ), _net_plugin );
+     }
+     catch( std::exception& e ) {
+        //making a session creates an instance of std::random_device which may open /dev/urandom
+        // for example. Unfortuately the only defined error is a std::exception derivative
+        _socket.close();
+     }
+     if( newsession ) {
+        _net_plugin->async_add_session( newsession );
+        newsession->_local_peer_id = _net_plugin->_peer_id;
+        newsession->run();
+     }
      do_accept();
    }
 
@@ -1203,39 +1295,64 @@ namespace eosio {
    void bnet_plugin::set_program_options(options_description& cli, options_description& cfg) {
       cfg.add_options()
          ("bnet-endpoint", bpo::value<string>()->default_value("0.0.0.0:4321"), "the endpoint upon which to listen for incoming connections" )
+         ("bnet-follow-irreversible", bpo::value<bool>()->default_value(false), "this peer will request only irreversible blocks from other nodes" )
          ("bnet-threads", bpo::value<uint32_t>(), "the number of threads to use to process network messages" )
          ("bnet-connect", bpo::value<vector<string>>()->composing(), "remote endpoint of other node to connect to; Use multiple bnet-connect options as needed to compose a network" )
          ("bnet-no-trx", bpo::bool_switch()->default_value(false), "this peer will request no pending transactions from other nodes" )
+         ("bnet-peer-log-format", bpo::value<string>()->default_value( "[\"${_name}\" ${_ip}:${_port}]" ),
+           "The string used to format peers when logging messages about them.  Variables are escaped with ${<variable name>}.\n"
+           "Available Variables:\n"
+           "   _name  \tself-reported name\n\n"
+           "   _id    \tself-reported ID (Public Key)\n\n"
+           "   _ip    \tremote IP address of peer\n\n"
+           "   _port  \tremote port number of peer\n\n"
+           "   _lip   \tlocal IP address connected to peer\n\n"
+           "   _lport \tlocal port number connected to peer\n\n")
          ;
    }
 
    void bnet_plugin::plugin_initialize(const variables_map& options) {
       ilog( "Initialize bnet plugin" );
 
-      if( options.count( "bnet-endpoint" ) ) {
-         auto ip_port = options.at("bnet-endpoint").as< string >();
+      try {
+         peer_log_format = options.at( "bnet-peer-log-format" ).as<string>();
 
-        //auto host = boost::asio::ip::host_name(ip_port);
-        auto port = ip_port.substr( ip_port.find(':')+1, ip_port.size() );
-        auto host = ip_port.substr( 0, ip_port.find(':') );
-        my->_bnet_endpoint_address = host;
-        my->_bnet_endpoint_port = std::stoi( port );
-        idump((ip_port)(host)(port));
-      }
+         if( options.count( "bnet-endpoint" )) {
+            auto ip_port = options.at( "bnet-endpoint" ).as<string>();
 
-      if( options.count( "bnet-connect" ) ) {
-         my->_connect_to_peers = options.at( "bnet-connect" ).as<vector<string>>();
-      }
-      if( options.count( "bnet-threads" ) ) {
-         my->_num_threads = options.at("bnet-threads").as<uint32_t>();
-         if( my->_num_threads > 8 )
-            my->_num_threads = 8;
-      }
-      my->_request_trx = !options.at( "bnet-no-trx" ).as<bool>();
+            //auto host = boost::asio::ip::host_name(ip_port);
+            auto port = ip_port.substr( ip_port.find( ':' ) + 1, ip_port.size());
+            auto host = ip_port.substr( 0, ip_port.find( ':' ));
+            my->_bnet_endpoint_address = host;
+            my->_bnet_endpoint_port = std::stoi( port );
+            idump((ip_port)( host )( port )( my->_follow_irreversible ));
+         }
+         if( options.count( "bnet-follow-irreversible" )) {
+            my->_follow_irreversible = options.at( "bnet-follow-irreversible" ).as<bool>();
+         }
+
+
+         if( options.count( "bnet-connect" )) {
+            my->_connect_to_peers = options.at( "bnet-connect" ).as<vector<string>>();
+         }
+         if( options.count( "bnet-threads" )) {
+            my->_num_threads = options.at( "bnet-threads" ).as<uint32_t>();
+            if( my->_num_threads > 8 )
+               my->_num_threads = 8;
+         }
+         my->_request_trx = !options.at( "bnet-no-trx" ).as<bool>();
+
+      } FC_LOG_AND_RETHROW()
    }
 
    void bnet_plugin::plugin_startup() {
+      if(fc::get_logger_map().find(logger_name) != fc::get_logger_map().end())
+         plugin_logger = fc::get_logger_map()[logger_name];
+
       wlog( "bnet startup " );
+
+      auto& chain = app().get_plugin<chain_plugin>().chain();
+      FC_ASSERT ( chain.get_read_mode() != chain::db_read_mode::IRREVERSIBLE, "bnet is not compatible with \"irreversible\" read_mode");
 
       my->_on_appled_trx_handle = app().get_channel<channels::accepted_transaction>()
                                 .subscribe( [this]( transaction_metadata_ptr t ){
@@ -1263,6 +1380,13 @@ namespace eosio {
                                 });
 
 
+      if( app().get_plugin<chain_plugin>().chain().get_read_mode() == chain::db_read_mode::READ_ONLY ) {
+         if (my->_request_trx) {
+            my->_request_trx = false;
+            ilog( "forced bnet-no-trx to true since in read-only mode" );
+         }
+      }
+
       const auto address = boost::asio::ip::make_address( my->_bnet_endpoint_address );
       my->_ioc.reset( new boost::asio::io_context{my->_num_threads} );
 
@@ -1274,7 +1398,7 @@ namespace eosio {
 
       my->_listener = std::make_shared<listener>( ioc,
                                                   tcp::endpoint{ address, my->_bnet_endpoint_port },
-                                                  std::ref(*my) );
+                                                  my );
       my->_listener->run();
 
       my->_socket_threads.reserve( my->_num_threads );
@@ -1283,7 +1407,7 @@ namespace eosio {
       }
 
       for( const auto& peer : my->_connect_to_peers ) {
-         auto s = std::make_shared<session>( ioc, std::ref(*my) );
+         auto s = std::make_shared<session>( ioc, my );
          s->_local_peer_id = my->_peer_id;
          my->_sessions[s.get()] = s;
          s->run( peer );
@@ -1298,6 +1422,12 @@ namespace eosio {
          elog( "exception thrown on timer shutdown" );
       }
 
+      /// shut down all threads and close all connections
+
+      my->for_each_session([](auto ses){
+         ses->do_goodbye( "shutting down" );
+      });
+
       my->_listener.reset();
       my->_ioc->stop();
 
@@ -1306,14 +1436,18 @@ namespace eosio {
          t.join();
       }
       wlog( "done joining threads" );
-      my->_ioc.reset();
-      /// shut down all threads and close all connections
+
+      my->for_each_session([](auto ses){
+         EOS_ASSERT( false, plugin_exception, "session ${ses} still active", ("ses", ses->_session_num) );
+      });
+
+      // lifetime of _ioc is guarded by shared_ptr of bnet_plugin_impl
    }
 
 
    session::~session() {
      wlog( "close session ${n}",("n",_session_num) );
-     std::weak_ptr<bnet_plugin_impl> netp = _net_plugin.shared_from_this();
+     std::weak_ptr<bnet_plugin_impl> netp = _net_plugin;
      _app_ios.post( [netp,ses=this]{
         if( auto net = netp.lock() )
            net->on_session_close(ses);
@@ -1327,18 +1461,22 @@ namespace eosio {
           hello_msg.peer_id = self->_local_peer_id;
           hello_msg.last_irr_block_num = lib;
           hello_msg.pending_block_ids  = ids;
-          hello_msg.request_transactions = self->_net_plugin._request_trx;
+          hello_msg.request_transactions = self->_net_plugin->_request_trx;
           hello_msg.chain_id = app().get_plugin<chain_plugin>().get_chain_id(); // TODO: Quick fix in a rush. Maybe a better solution is needed.
 
           self->_local_lib = lib;
-          self->send( hello_msg );
+          if ( self->_net_plugin->_follow_irreversible ) {
+             self->send( hello_msg, hello_extension(hello_extension_irreversible_only()) );
+          } else {
+             self->send( hello_msg );
+          }
           self->_sent_remote_hello = true;
       });
    }
 
    void session::check_for_redundant_connection() {
      app().get_io_service().post( [self=shared_from_this()]{
-       self->_net_plugin.for_each_session( [self]( auto ses ){
+       self->_net_plugin->for_each_session( [self]( auto ses ){
          if( ses != self && ses->_remote_peer_id == self->_remote_peer_id ) {
            self->do_goodbye( "redundant connection" );
          }
@@ -1346,4 +1484,79 @@ namespace eosio {
      });
    }
 
+   void session::on( const hello& hi, fc::datastream<const char*>& ds ) {
+      peer_ilog(this, "received hello");
+      _recv_remote_hello     = true;
+
+      if( hi.chain_id != app().get_plugin<chain_plugin>().get_chain_id() ) { // TODO: Quick fix in a rush. Maybe a better solution is needed.
+         peer_elog(this, "bad hello : wrong chain id");
+         return do_goodbye( "disconnecting due to wrong chain id" );
+      }
+
+      if( hi.peer_id == _local_peer_id ) {
+         return do_goodbye( "connected to self" );
+      }
+
+      if ( _net_plugin->_follow_irreversible && hi.protocol_version <= "1.0.0") {
+         return do_goodbye( "need newer protocol version that supports sending only irreversible blocks" );
+      }
+
+      if ( hi.protocol_version >= "1.0.1" ) {
+         //optional extensions
+         while ( 0 < ds.remaining() ) {
+            unsigned_int size;
+            fc::raw::unpack( ds, size ); // next extension size
+            auto ex_start = ds.pos();
+            fc::datastream<const char*> dsw( ex_start, size );
+            unsigned_int wich;
+            fc::raw::unpack( dsw, wich );
+            hello_extension ex;
+            if ( wich < ex.count() ) { //know extension
+               fc::datastream<const char*> dsx( ex_start, size ); //unpack needs to read static_variant _tag again
+               fc::raw::unpack( dsx, ex );
+               if ( ex.which() == hello_extension::tag<hello_extension_irreversible_only>::value ) {
+                  _remote_request_irreversible_only = true;
+               }
+            } else {
+               //unsupported extension, we just ignore it
+               //another side does know our protocol version, i.e. it know which extensions we support
+               //so, it some extensions were crucial, another side will close the connection
+            }
+            ds.skip(size); //move to next extension
+         }
+      }
+
+      _last_sent_block_num   = hi.last_irr_block_num;
+      _remote_request_trx    = hi.request_transactions;
+      _remote_peer_id        = hi.peer_id;
+      _remote_lib            = hi.last_irr_block_num;
+
+      for( const auto& id : hi.pending_block_ids )
+         mark_block_status( id, true, false );
+
+      check_for_redundant_connection();
+
+   }
+
+   void session::on( const packed_transaction_ptr& p ) {
+      peer_ilog(this, "received packed_transaction_ptr");
+      if (!p) {
+        peer_elog(this, "bad packed_transaction_ptr : null pointer");
+        EOS_THROW(transaction_exception, "bad transaction");
+      }
+      if( !_net_plugin->_request_trx )
+        return;
+
+      // ilog( "recv trx ${n}", ("n", id) );
+      if( p->expiration() < fc::time_point::now() ) return;
+
+      const auto& id = p->id();
+
+      if( mark_transaction_known_by_peer( id ) )
+        return;
+
+      auto ptr = std::make_shared<transaction_metadata>(p);
+
+      app().get_channel<incoming::channels::transaction>().publish(ptr);
+   }
 } /// namespace eosio

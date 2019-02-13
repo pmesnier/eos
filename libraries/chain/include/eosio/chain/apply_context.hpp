@@ -1,6 +1,6 @@
 /**
  *  @file
- *  @copyright defined in eos/LICENSE.txt
+ *  @copyright defined in eos/LICENSE
  */
 #pragma once
 #include <eosio/chain/controller.hpp>
@@ -42,36 +42,36 @@ class apply_context {
 
             const table_id_object& get_table( table_id_object::id_type i )const {
                auto itr = _table_cache.find(i);
-               FC_ASSERT( itr != _table_cache.end(), "an invariant was broken, table should be in cache" );
+               EOS_ASSERT( itr != _table_cache.end(), table_not_in_cache, "an invariant was broken, table should be in cache" );
                return *itr->second.first;
             }
 
             int get_end_iterator_by_table_id( table_id_object::id_type i )const {
                auto itr = _table_cache.find(i);
-               FC_ASSERT( itr != _table_cache.end(), "an invariant was broken, table should be in cache" );
+               EOS_ASSERT( itr != _table_cache.end(), table_not_in_cache, "an invariant was broken, table should be in cache" );
                return itr->second.second;
             }
 
             const table_id_object* find_table_by_end_iterator( int ei )const {
-               FC_ASSERT( ei < -1, "not an end iterator" );
+               EOS_ASSERT( ei < -1, invalid_table_iterator, "not an end iterator" );
                auto indx = end_iterator_to_index(ei);
                if( indx >= _end_iterator_to_table.size() ) return nullptr;
                return _end_iterator_to_table[indx];
             }
 
             const T& get( int iterator ) {
-               FC_ASSERT( iterator != -1, "invalid iterator" );
-               FC_ASSERT( iterator >= 0, "dereference of end iterator" );
-               FC_ASSERT( iterator < _iterator_to_object.size(), "iterator out of range" );
+               EOS_ASSERT( iterator != -1, invalid_table_iterator, "invalid iterator" );
+               EOS_ASSERT( iterator >= 0, table_operation_not_permitted, "dereference of end iterator" );
+               EOS_ASSERT( iterator < _iterator_to_object.size(), invalid_table_iterator, "iterator out of range" );
                auto result = _iterator_to_object[iterator];
-               FC_ASSERT( result, "dereference of deleted object" );
+               EOS_ASSERT( result, table_operation_not_permitted, "dereference of deleted object" );
                return *result;
             }
 
             void remove( int iterator ) {
-               FC_ASSERT( iterator != -1, "invalid iterator" );
-               FC_ASSERT( iterator >= 0, "cannot call remove on end iterators" );
-               FC_ASSERT( iterator < _iterator_to_object.size(), "iterator out of range" );
+               EOS_ASSERT( iterator != -1, invalid_table_iterator, "invalid iterator" );
+               EOS_ASSERT( iterator >= 0, table_operation_not_permitted, "cannot call remove on end iterators" );
+               EOS_ASSERT( iterator < _iterator_to_object.size(), invalid_table_iterator, "iterator out of range" );
                auto obj_ptr = _iterator_to_object[iterator];
                if( !obj_ptr ) return;
                _iterator_to_object[iterator] = nullptr;
@@ -179,7 +179,7 @@ class apply_context {
             int store( uint64_t scope, uint64_t table, const account_name& payer,
                        uint64_t id, secondary_key_proxy_const_type value )
             {
-               FC_ASSERT( payer != account_name(), "must specify a valid account to pay for new record" );
+               EOS_ASSERT( payer != account_name(), invalid_table_payer, "must specify a valid account to pay for new record" );
 
 //               context.require_write_lock( scope );
 
@@ -207,7 +207,7 @@ class apply_context {
                context.update_db_usage( obj.payer, -( config::billable_size_v<ObjectType> ) );
 
                const auto& table_obj = itr_cache.get_table( obj.t_id );
-               FC_ASSERT( table_obj.code == context.receiver, "db access violation" );
+               EOS_ASSERT( table_obj.code == context.receiver, table_access_violation, "db access violation" );
 
 //               context.require_write_lock( table_obj.scope );
 
@@ -227,7 +227,7 @@ class apply_context {
                const auto& obj = itr_cache.get( iterator );
 
                const auto& table_obj = itr_cache.get_table( obj.t_id );
-               FC_ASSERT( table_obj.code == context.receiver, "db access violation" );
+               EOS_ASSERT( table_obj.code == context.receiver, table_access_violation, "db access violation" );
 
 //               context.require_write_lock( table_obj.scope );
 
@@ -322,7 +322,7 @@ class apply_context {
                if( iterator < -1 ) // is end iterator
                {
                   auto tab = itr_cache.find_table_by_end_iterator(iterator);
-                  FC_ASSERT( tab, "not a valid end iterator" );
+                  EOS_ASSERT( tab, invalid_table_iterator, "not a valid end iterator" );
 
                   auto itr = idx.upper_bound(tab->id);
                   if( idx.begin() == idx.end() || itr == idx.begin() ) return -1; // Empty index
@@ -411,7 +411,7 @@ class apply_context {
                if( iterator < -1 ) // is end iterator
                {
                   auto tab = itr_cache.find_table_by_end_iterator(iterator);
-                  FC_ASSERT( tab, "not a valid end iterator" );
+                  EOS_ASSERT( tab, invalid_table_iterator, "not a valid end iterator" );
 
                   auto itr = idx.upper_bound(tab->id);
                   if( idx.begin() == idx.end() || itr == idx.begin() ) return -1; // Empty table
@@ -453,7 +453,7 @@ class apply_context {
    public:
       apply_context(controller& con, transaction_context& trx_ctx, const action& a, uint32_t depth=0)
       :control(con)
-      ,db(con.db())
+      ,db(con.mutable_db())
       ,trx_context(trx_ctx)
       ,act(a)
       ,receiver(act.account)
@@ -472,8 +472,8 @@ class apply_context {
    /// Execution methods:
    public:
 
-      action_trace exec_one();
-      void exec();
+      void exec_one( action_trace& trace );
+      void exec( action_trace& trace );
       void execute_inline( action&& a );
       void execute_context_free_inline( action&& a );
       void schedule_deferred_transaction( const uint128_t& sender_id, account_name payer, transaction&& trx, bool replace_existing );
@@ -572,11 +572,8 @@ class apply_context {
       uint64_t next_recv_sequence( account_name receiver );
       uint64_t next_auth_sequence( account_name actor );
 
-   private:
-
-      void validate_referenced_accounts( const transaction& t )const;
-      void validate_expiration( const transaction& t )const;
-
+      void add_ram_usage( account_name account, int64_t ram_delta );
+      void finalize_trace( action_trace& trace, const fc::time_point& start );
 
    /// Fields:
    public:
@@ -598,8 +595,6 @@ class apply_context {
       generic_index<index_double_object>                             idx_double;
       generic_index<index_long_double_object>                        idx_long_double;
 
-      action_trace                                trace;
-
    private:
 
       iterator_cache<key_value_object>    keyval_cache;
@@ -607,6 +602,7 @@ class apply_context {
       vector<action>                      _inline_actions; ///< queued inline messages
       vector<action>                      _cfa_inline_actions; ///< queued inline messages
       std::ostringstream                  _pending_console_output;
+      flat_set<account_delta>             _account_ram_deltas; ///< flat_set of account_delta so json is an array of objects
 
       //bytes                               _cached_trx;
 };

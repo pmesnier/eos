@@ -1,6 +1,6 @@
 /**
  *  @file
- *  @copyright defined in eos/LICENSE.txt
+ *  @copyright defined in eos/LICENSE
  */
 #pragma once
 
@@ -30,11 +30,8 @@ namespace eosio {
                         account_name to,
                         asset        quantity,
                         string       memo );
-
-      private:
-
-         friend eosiosystem::system_contract;
-
+      
+      
          inline asset get_supply( symbol_name sym )const;
          
          inline asset get_balance( account_name owner, symbol_name sym )const;

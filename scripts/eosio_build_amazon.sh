@@ -2,7 +2,7 @@
 
 	MEM_MEG=$( free -m | sed -n 2p | tr -s ' ' | cut -d\  -f2 )
 	CPU_SPEED=$( lscpu | grep "MHz" | tr -s ' ' | cut -d\  -f3 | cut -d'.' -f1 )
-	CPU_CORE=$( lscpu | grep "^CPU(s)" | tr -s ' ' | cut -d\  -f2 )
+	CPU_CORE=$( lscpu -pCPU | grep -v "#" | wc -l )
 	MEM_GIG=$(( ((MEM_MEG / 1000) / 2) ))
 	JOBS=$(( MEM_GIG > CPU_CORE ? CPU_CORE : MEM_GIG ))
 
@@ -23,7 +23,7 @@
 		exit 1
 	fi
 
-	if [ "${OS_VER}" -lt 2017 ]; then
+	if [[ "${OS_NAME}" == "Amazon Linux AMI" && "${OS_VER}" -lt 2017 ]]; then
 		printf "\\tYou must be running Amazon Linux 2017.09 or higher to install EOSIO.\\n"
 		printf "\\texiting now.\\n"
 		exit 1
@@ -53,9 +53,15 @@
 	fi
 	printf "\\t%s\\n" "${UPDATE}"
 
-	DEP_ARRAY=( git gcc72.x86_64 gcc72-c++.x86_64 autoconf automake libtool make bzip2 \
-	bzip2-devel.x86_64 openssl-devel.x86_64 gmp-devel.x86_64 libstdc++72.x86_64 \
-	python27.x86_64 python36-devel.x86_64 libedit-devel.x86_64 doxygen.x86_64 graphviz.x86_64)
+	if [[ "${OS_NAME}" == "Amazon Linux AMI" ]]; then
+		DEP_ARRAY=( git gcc72.x86_64 gcc72-c++.x86_64 autoconf automake libtool make bzip2 \
+		bzip2-devel.x86_64 openssl-devel.x86_64 gmp-devel.x86_64 libstdc++72.x86_64 \
+		python27.x86_64 python36-devel.x86_64 libedit-devel.x86_64 doxygen.x86_64 graphviz.x86_64)
+	else
+		DEP_ARRAY=( git gcc gcc-c++ autoconf automake libtool make bzip2 \
+		bzip2-devel openssl-devel gmp-devel libstdc++ \
+		python3 python3-devel libedit-devel doxygen graphviz)
+	fi
 	COUNT=1
 	DISPLAY=""
 	DEP=""
@@ -64,7 +70,7 @@
 
 	for (( i=0; i<${#DEP_ARRAY[@]}; i++ ));
 	do
-		pkg=$( sudo "$YUM" info "${DEP_ARRAY[$i]}" 2>/dev/null | grep Repo | tr -s ' ' | cut -d: -f2 | sed 's/ //g' )
+		pkg=$("$YUM" info "${DEP_ARRAY[$i]}" 2>/dev/null | grep Repo | tr -s ' ' | cut -d: -f2 | sed 's/ //g' )
 
 		if [ "$pkg" != "installed" ]; then
 			DEP=$DEP" ${DEP_ARRAY[$i]} "
@@ -211,6 +217,23 @@
 		printf "\\tCMAKE found @ %s.\\n" "${CMAKE}"
 	fi
 
+	if [ -d "${HOME}/opt/boost_1_67_0" ]; then
+		if ! mv "${HOME}/opt/boost_1_67_0" "$BOOST_ROOT"
+		then
+			printf "\\n\\tUnable to move directory %s/opt/boost_1_67_0 to %s.\\n" "${HOME}" "${BOOST_ROOT}"
+			printf "\\n\\tExiting now.\\n"
+			exit 1
+		fi
+		if [ -d "$BUILD_DIR" ]; then
+			if ! rm -rf "$BUILD_DIR"
+			then
+			printf "\\tUnable to remove directory %s. Please remove this directory and run this script %s again. 0\\n" "$BUILD_DIR" "${BASH_SOURCE[0]}"
+			printf "\\tExiting now.\\n\\n"
+			exit 1;
+			fi
+		fi
+	fi
+	
 	printf "\\n\\tChecking boost library installation.\\n"
 	BVERSION=$( grep "BOOST_LIB_VERSION" "${BOOST_ROOT}/include/boost/version.hpp" 2>/dev/null \
 	| tail -1 | tr -s ' ' | cut -d\  -f3 | sed 's/[^0-9\._]//gI' )
@@ -260,7 +283,7 @@
 			printf "\\n\\tExiting now.\\n"
 			exit 1
 		fi
-		if ! "${TEMP_DIR}"/boost_1_67_0/b2 install
+		if ! "${TEMP_DIR}"/boost_1_67_0/b2 -j"${CPU_CORE}" install
 		then
 			printf "\\n\\tInstallation of boost libraries failed. 1\\n"
 			printf "\\n\\tExiting now.\\n"
@@ -272,9 +295,17 @@
 			printf "\\n\\tExiting now.\\n"
 			exit 1
 		fi
-		printf "\\tBoost successfully installed @ %s/opt/boost_1_67_0.\\n" "${HOME}"
+		if [ -d "$BUILD_DIR" ]; then
+			if ! rm -rf "$BUILD_DIR"
+			then
+			printf "\\tUnable to remove directory %s. Please remove this directory and run this script %s again. 0\\n" "$BUILD_DIR" "${BASH_SOURCE[0]}"
+			printf "\\tExiting now.\\n\\n"
+			exit 1;
+			fi
+		fi
+		printf "\\tBoost successfully installed @ %s.\\n" "${BOOST_ROOT}"
 	else
-		printf "\\tBoost 1.67.0 found at %s/opt/boost_1_67_0.\\n" "${HOME}"
+		printf "\\tBoost found at %s.\\n" "${BOOST_ROOT}"
 	fi
 
 	printf "\\n\\tChecking MongoDB installation.\\n"
@@ -356,46 +387,83 @@ fi
 	fi
 
 	printf "\\n\\tChecking MongoDB C++ driver installation.\\n"
-	if [ ! -e "/usr/local/lib/libmongocxx-static.a" ]; then
+	MONGO_INSTALL=true
+    if [ -e "/usr/local/lib64/libmongocxx-static.a" ]; then
+		MONGO_INSTALL=false
+		if [ ! -f /usr/local/lib64/pkgconfig/libmongocxx-static.pc ]; then
+			MONGO_INSTALL=true
+		else
+			if ! version=$( grep "Version:" /usr/local/lib64/pkgconfig/libmongocxx-static.pc | tr -s ' ' | awk '{print $2}' )
+			then
+				printf "\\tUnable to determine mongodb-cxx-driver version.\\n"
+				printf "\\tExiting now.\\n\\n"
+				exit 1;
+			fi
+			maj=$( echo "${version}" | cut -d'.' -f1 )
+			min=$( echo "${version}" | cut -d'.' -f2 )
+			if [ "${maj}" -gt 3 ]; then
+				MONGO_INSTALL=true
+			elif [ "${maj}" -eq 3 ] && [ "${min}" -lt 3 ]; then
+				MONGO_INSTALL=true
+			fi
+		fi
+	fi
+
+    if [ $MONGO_INSTALL == "true" ]; then
 		if ! cd "${TEMP_DIR}"
 		then
-			printf "\\n\\tUnable to cd into directory %s.\\n" "${TEMP_DIR}"
-			printf "\\n\\tExiting now.\\n"
+			printf "\\tUnable to enter directory %s.\\n" "${TEMP_DIR}"
+			printf "\\tExiting now.\\n\\n"
 			exit 1;
 		fi
-		STATUS=$(curl -LO -w '%{http_code}' --connect-timeout 30 \
-		"https://github.com/mongodb/mongo-c-driver/releases/download/1.9.3/mongo-c-driver-1.9.3.tar.gz" )
+		STATUS=$( curl -LO -w '%{http_code}' --connect-timeout 30 https://github.com/mongodb/mongo-c-driver/releases/download/1.10.2/mongo-c-driver-1.10.2.tar.gz )
 		if [ "${STATUS}" -ne 200 ]; then
-			rm -f "${TEMP_DIR}/mongo-c-driver-1.9.3.tar.gz"
+			if ! rm -f "${TEMP_DIR}/mongo-c-driver-1.10.2.tar.gz"
+			then
+				printf "\\tUnable to remove file %s/mongo-c-driver-1.10.2.tar.gz.\\n" "${TEMP_DIR}"
+			fi
 			printf "\\tUnable to download MongoDB C driver at this time.\\n"
 			printf "\\tExiting now.\\n\\n"
 			exit 1;
 		fi
-		if ! tar xf "${TEMP_DIR}/mongo-c-driver-1.9.3.tar.gz"
+		if ! tar xf mongo-c-driver-1.10.2.tar.gz
 		then
-			printf "\\n\\tUnable to decompress file  %s/mongo-c-driver-1.9.3.tar.gz.\\n" "${TEMP_DIR}"
-			printf "\\n\\tExiting now.\\n"
-			exit 1;
-		fi
-		if ! rm -f "${TEMP_DIR}/mongo-c-driver-1.9.3.tar.gz"
-		then
-			printf "\\n\\tUnable to remove file  %s/mongo-c-driver-1.9.3.tar.gz.\\n" "${TEMP_DIR}"
-			printf "\\n\\tExiting now.\\n"
-			exit 1;
-		fi
-		if ! cd "${TEMP_DIR}/mongo-c-driver-1.9.3"
-		then
-			printf "\\n\\tUnable to change directory info  %s/mongo-c-driver-1.9.3.\\n" "${TEMP_DIR}"
-			printf "\\n\\tExiting now.\\n"
-			exit 1;
-		fi
-		if ! ./configure --enable-static --with-libbson=bundled --enable-ssl=openssl --disable-automatic-init-and-cleanup --prefix=/usr/local
-		then
-			printf "\\tConfiguring MongoDB C driver has encountered the above errors.\\n"
+			printf "\\tUnable to unarchive file %s/mongo-c-driver-1.10.2.tar.gz.\\n" "${TEMP_DIR}"
 			printf "\\tExiting now.\\n\\n"
 			exit 1;
 		fi
-		if ! make -j"${JOBS}"
+		if ! rm -f "${TEMP_DIR}/mongo-c-driver-1.10.2.tar.gz"
+		then
+			printf "\\tUnable to remove file mongo-c-driver-1.10.2.tar.gz.\\n"
+			printf "\\tExiting now.\\n\\n"
+			exit 1;
+		fi
+		if ! cd "${TEMP_DIR}"/mongo-c-driver-1.10.2
+		then
+			printf "\\tUnable to cd into directory %s/mongo-c-driver-1.10.2.\\n" "${TEMP_DIR}"
+			printf "\\tExiting now.\\n\\n"
+			exit 1;
+		fi
+		if ! mkdir cmake-build
+		then
+			printf "\\tUnable to create directory %s/mongo-c-driver-1.10.2/cmake-build.\\n" "${TEMP_DIR}"
+			printf "\\tExiting now.\\n\\n"
+			exit 1;
+		fi
+		if ! cd cmake-build
+		then
+			printf "\\tUnable to enter directory %s/mongo-c-driver-1.10.2/cmake-build.\\n" "${TEMP_DIR}"
+			printf "\\tExiting now.\\n\\n"
+			exit 1;
+		fi
+		if ! "${CMAKE}" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local -DENABLE_BSON=ON \
+		-DENABLE_SSL=OPENSSL -DENABLE_AUTOMATIC_INIT_AND_CLEANUP=ON -DENABLE_STATIC=ON ..
+		then
+			printf "\\tConfiguring MongoDB C driver has encountered the errors above.\\n"
+			printf "\\tExiting now.\\n\\n"
+			exit 1;
+		fi
+		if ! make -j"${CPU_CORE}"
 		then
 			printf "\\tError compiling MongoDB C driver.\\n"
 			printf "\\tExiting now.\\n\\n"
@@ -409,36 +477,35 @@ fi
 		fi
 		if ! cd "${TEMP_DIR}"
 		then
-			printf "\\n\\tUnable to cd into directory %s.\\n" "${TEMP_DIR}"
-			printf "\\n\\tExiting now.\\n"
+			printf "\\tUnable to enter directory %s.\\n" "${TEMP_DIR}"
+			printf "\\tExiting now.\\n\\n"
 			exit 1;
 		fi
-		if ! rm -rf "${TEMP_DIR}/mongo-c-driver-1.9.3"
+		if ! rm -rf "${TEMP_DIR}/mongo-c-driver-1.10.2"
 		then
-			printf "\\n\\tUnable to remove  directory %s/mongo-c-driver-1.9.3.\\n" "${TEMP_DIR}"
-			printf "\\n\\tExiting now.\\n"
+			printf "\\tUnable to remove directory %s/mongo-c-driver-1.10.2.\\n" "${TEMP_DIR}"
+			printf "\\tExiting now.\\n\\n"
 			exit 1;
 		fi
-		if ! git clone https://github.com/mongodb/mongo-cxx-driver.git --branch releases/stable --depth 1
+		if ! git clone https://github.com/mongodb/mongo-cxx-driver.git --branch releases/v3.3 --depth 1
 		then
 			printf "\\tUnable to clone MongoDB C++ driver at this time.\\n"
 			printf "\\tExiting now.\\n\\n"
-			exit;
+			exit 1;
 		fi
 		if ! cd "${TEMP_DIR}/mongo-cxx-driver/build"
 		then
-			printf "\\n\\tUnable to enter directory %s/mongo-cxx-driver/build.\\n" "${TEMP_DIR}"
-			printf "\\n\\tExiting now.\\n"
+			printf "\\tUnable to enter directory %s/mongo-cxx-driver/build.\\n" "${TEMP_DIR}"
+			printf "\\tExiting now.\\n\\n"
 			exit 1;
 		fi
-		
-		if ! "${CMAKE}" -DBUILD_SHARED_LIBS="OFF" -DCMAKE_BUILD_TYPE="Release" -DCMAKE_INSTALL_PREFIX="/usr/local" "${TEMP_DIR}/mongo-cxx-driver"
+		if ! "${CMAKE}" -DBUILD_SHARED_LIBS=OFF -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local ..
 		then
 			printf "\\tCmake has encountered the above errors building the MongoDB C++ driver.\\n"
 			printf "\\tExiting now.\\n\\n"
 			exit 1;
 		fi
-		if ! sudo make -j"${JOBS}"
+		if ! sudo make -j"${CPU_CORE}"
 		then
 			printf "\\tError compiling MongoDB C++ driver.\\n"
 			printf "\\tExiting now.\\n\\n"
@@ -452,76 +519,19 @@ fi
 		fi
 		if ! cd "${TEMP_DIR}"
 		then
-			printf "\\n\\tUnable to cd into directory %s.\\n" "${TEMP_DIR}"
-			printf "\\n\\tExiting now.\\n"
+			printf "\\tUnable to enter directory %s.\\n" "${TEMP_DIR}"
+			printf "\\tExiting now.\\n\\n"
 			exit 1;
 		fi
 		if ! sudo rm -rf "${TEMP_DIR}/mongo-cxx-driver"
 		then
-			printf "\\n\\tUnable to remove directory %s/mongo-cxx-driver.\\n" "${TEMP_DIR}"
-			printf "\\n\\tExiting now.\\n"
+			printf "\\tUnable to remove directory %s/mongo-cxx-driver.\\n" "${TEMP_DIR}" "${TEMP_DIR}"
+			printf "\\tExiting now.\\n\\n"
 			exit 1;
 		fi
-		printf "\\tSuccessfully installed Mongo C/C++ drivers found at /usr/local/lib.\\n"
+		printf "\\tMongo C++ driver installed at /usr/local/lib64/libmongocxx-static.a.\\n"
 	else
-		printf "\\tMongo C++ driver found at /usr/local/lib.\\n"
-	fi
-
-	printf "\\n\\tChecking secp256k1-zkp installation.\\n"
-    # install secp256k1-zkp (Cryptonomex branch)
-    if [ ! -e "/usr/local/lib/libsecp256k1.a" ]; then
-		printf "\\tInstalling secp256k1-zkp (Cryptonomex branch).\\n"
-		if ! cd "${TEMP_DIR}"
-		then
-			printf "\\n\\tUnable to enter directory %s.\\n" "${TEMP_DIR}"
-			printf "\\n\\tExiting now.\\n"
-			exit 1;
-		fi
-		if ! git clone https://github.com/cryptonomex/secp256k1-zkp.git
-		then
-			printf "\\tUnable to clone repo secp256k1-zkp @ https://github.com/cryptonomex/secp256k1-zkp.git.\\n"
-			printf "\\tExiting now.\\n\\n"
-			exit 1;
-		fi
-		if ! cd "${TEMP_DIR}/secp256k1-zkp"
-		then
-			printf "\\n\\tUnable to cd into directory %s/secp256k1-zkp.\\n" "${TEMP_DIR}"
-			printf "\\n\\tExiting now.\\n"
-			exit 1;
-		fi
-		if ! ./autogen.sh
-		then
-			printf "\\tError running autogen for secp256k1-zkp.\\n"
-			printf "\\tExiting now.\\n\\n"
-			exit 1;
-		fi
-		if ! ./configure
-		then
-			printf "\\tError running configure for secp256k1-zkp.\\n"
-			printf "\\tExiting now.\\n\\n"
-			exit 1;
-		fi
-		if ! make -j"${JOBS}"
-		then
-			printf "\\tError compiling secp256k1-zkp.\\n"
-			printf "\\tExiting now.\\n\\n"
-			exit 1;
-		fi
-		if ! sudo make install
-		then
-			printf "\\tError installing secp256k1-zkp.\\n"
-			printf "\\tExiting now.\\n\\n"
-			exit 1;
-		fi
-		if ! rm -rf "${TEMP_DIR}/secp256k1-zkp"
-		then
-			printf "\\tError removing directory %s/secp256k1-zkp.\\n" "${TEMP_DIR}"
-			printf "\\tExiting now.\\n\\n"
-			exit 1;
-		fi
-		printf "\\tsecp256k1 successfully installed @ /usr/local/lib/libsecp256k1.a.\\n"
-	else
-		printf "\\tsecp256k1 found @ /usr/local/lib/libsecp256k1.a.\\n"
+		printf "\\tMongo C++ driver found at /usr/local/lib64/libmongocxx-static.a.\\n"
 	fi
 
 	printf "\\n\\tChecking LLVM with WASM support.\\n"

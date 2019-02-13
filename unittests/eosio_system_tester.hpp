@@ -1,6 +1,6 @@
 /**
  *  @file
- *  @copyright defined in eos/LICENSE.txt
+ *  @copyright defined in eos/LICENSE
  */
 #pragma once
 
@@ -59,7 +59,7 @@ public:
          const auto& accnt = control->db().get<account_object,by_name>( N(eosio.token) );
          abi_def abi;
          BOOST_REQUIRE_EQUAL(abi_serializer::to_abi(accnt.abi, abi), true);
-         token_abi_ser.set_abi(abi);
+         token_abi_ser.set_abi(abi, abi_serializer_max_time);
       }
 
       create_currency( N(eosio.token), config::system_account_name, core_from_string("10000000000.0000") );
@@ -73,7 +73,7 @@ public:
          const auto& accnt = control->db().get<account_object,by_name>( config::system_account_name );
          abi_def abi;
          BOOST_REQUIRE_EQUAL(abi_serializer::to_abi(accnt.abi, abi), true);
-         abi_ser.set_abi(abi);
+         abi_ser.set_abi(abi, abi_serializer_max_time);
       }
 
       produce_blocks();
@@ -229,7 +229,7 @@ public:
          action act;
          act.account = config::system_account_name;
          act.name = name;
-         act.data = abi_ser.variant_to_binary( action_type_name, data );
+         act.data = abi_ser.variant_to_binary( action_type_name, data, abi_serializer_max_time );
 
          return base_tester::push_action( std::move(act), auth ? uint64_t(signer) : signer == N(bob111111111) ? N(alice1111111) : N(bob111111111) );
    }
@@ -317,28 +317,35 @@ public:
       return r;
    }
 
+   action_result vote( const account_name& voter, const std::vector<account_name>& producers, const account_name& proxy = name(0) ) {
+      return push_action(voter, N(voteproducer), mvo()
+                         ("voter",     voter)
+                         ("proxy",     proxy)
+                         ("producers", producers));
+   }
+
    uint32_t last_block_time() const {
       return time_point_sec( control->head_block_time() ).sec_since_epoch();
    }
 
    asset get_balance( const account_name& act ) {
       vector<char> data = get_row_by_account( N(eosio.token), act, N(accounts), symbol(CORE_SYMBOL).to_symbol_code().value );
-      return data.empty() ? asset(0, symbol(CORE_SYMBOL)) : token_abi_ser.binary_to_variant("account", data)["balance"].as<asset>();
+      return data.empty() ? asset(0, symbol(CORE_SYMBOL)) : token_abi_ser.binary_to_variant("account", data, abi_serializer_max_time)["balance"].as<asset>();
    }
 
    fc::variant get_total_stake( const account_name& act ) {
       vector<char> data = get_row_by_account( config::system_account_name, act, N(userres), act );
-      return data.empty() ? fc::variant() : abi_ser.binary_to_variant( "user_resources", data );
+      return data.empty() ? fc::variant() : abi_ser.binary_to_variant( "user_resources", data, abi_serializer_max_time );
    }
 
    fc::variant get_voter_info( const account_name& act ) {
       vector<char> data = get_row_by_account( config::system_account_name, config::system_account_name, N(voters), act );
-      return data.empty() ? fc::variant() : abi_ser.binary_to_variant( "voter_info", data );
+      return data.empty() ? fc::variant() : abi_ser.binary_to_variant( "voter_info", data, abi_serializer_max_time );
    }
 
    fc::variant get_producer_info( const account_name& act ) {
       vector<char> data = get_row_by_account( config::system_account_name, config::system_account_name, N(producers), act );
-      return abi_ser.binary_to_variant( "producer_info", data );
+      return abi_ser.binary_to_variant( "producer_info", data, abi_serializer_max_time );
    }
 
    void create_currency( name contract, name manager, asset maxsupply ) {
@@ -378,7 +385,7 @@ public:
       auto symb = eosio::chain::symbol::from_string(symbolname);
       auto symbol_code = symb.to_symbol_code().value;
       vector<char> data = get_row_by_account( N(eosio.token), symbol_code, N(stat), symbol_code );
-      return data.empty() ? fc::variant() : token_abi_ser.binary_to_variant( "currency_stats", data );
+      return data.empty() ? fc::variant() : token_abi_ser.binary_to_variant( "currency_stats", data, abi_serializer_max_time );
    }
 
    asset get_token_supply() {
@@ -388,13 +395,13 @@ public:
    fc::variant get_global_state() {
       vector<char> data = get_row_by_account( config::system_account_name, config::system_account_name, N(global), N(global) );
       if (data.empty()) std::cout << "\nData is empty\n" << std::endl;
-      return data.empty() ? fc::variant() : abi_ser.binary_to_variant( "eosio_global_state", data );
+      return data.empty() ? fc::variant() : abi_ser.binary_to_variant( "eosio_global_state", data, abi_serializer_max_time );
 
    }
 
    fc::variant get_refund_request( name account ) {
       vector<char> data = get_row_by_account( config::system_account_name, account, N(refunds), account );
-      return data.empty() ? fc::variant() : abi_ser.binary_to_variant( "refund_request", data );
+      return data.empty() ? fc::variant() : abi_ser.binary_to_variant( "refund_request", data, abi_serializer_max_time );
    }
 
    abi_serializer initialize_multisig() {
@@ -417,24 +424,10 @@ public:
          const auto& accnt = control->db().get<account_object,by_name>( N(eosio.msig) );
          abi_def msig_abi;
          BOOST_REQUIRE_EQUAL(abi_serializer::to_abi(accnt.abi, msig_abi), true);
-         msig_abi_ser.set_abi(msig_abi);
+         msig_abi_ser.set_abi(msig_abi, abi_serializer_max_time);
       }
       return msig_abi_ser;
    }
-
-   //helper function
-   /*
-   action_result push_action_msig( const account_name& signer, const action_name &name, const variant_object &data ) {
-      string action_type_name = msig_abi_ser.get_action_type(name);
-
-      action act;
-      act.account = N(eosio.msig);
-      act.name = name;
-      act.data = msig_abi_ser.variant_to_binary( action_type_name, data );
-
-      return base_tester::push_action( std::move(act), signer );
-   };
-   */
 
    vector<name> active_and_vote_producers() {
       //stake more than 15% of total EOS supply to activate chain
@@ -490,6 +483,48 @@ public:
       return producer_names;
    }
 
+   void cross_15_percent_threshold() {
+      setup_producer_accounts({N(producer1111)});
+      regproducer(N(producer1111));
+      {
+         signed_transaction trx;
+         set_transaction_headers(trx);
+
+         trx.actions.emplace_back( get_action( config::system_account_name, N(delegatebw),
+                                               vector<permission_level>{{config::system_account_name, config::active_name}},
+                                               mvo()
+                                               ("from", name{config::system_account_name})
+                                               ("receiver", "producer1111")
+                                               ("stake_net_quantity", core_from_string("150000000.0000") )
+                                               ("stake_cpu_quantity", core_from_string("0.0000") )
+                                               ("transfer", 1 )
+                                             )
+                                 );
+         trx.actions.emplace_back( get_action( config::system_account_name, N(voteproducer),
+                                               vector<permission_level>{{N(producer1111), config::active_name}},
+                                               mvo()
+                                               ("voter", "producer1111")
+                                               ("proxy", name(0).to_string())
+                                               ("producers", vector<account_name>(1, N(producer1111)))
+                                             )
+                                 );
+         trx.actions.emplace_back( get_action( config::system_account_name, N(undelegatebw),
+                                               vector<permission_level>{{N(producer1111), config::active_name}},
+                                               mvo()
+                                               ("from", "producer1111")
+                                               ("receiver", "producer1111")
+                                               ("unstake_net_quantity", core_from_string("150000000.0000") )
+                                               ("unstake_cpu_quantity", core_from_string("0.0000") )
+                                             )
+                                 );
+
+         set_transaction_headers(trx);
+         trx.sign( get_private_key( config::system_account_name, "active" ), control->get_chain_id()  );
+         trx.sign( get_private_key( N(producer1111), "active" ), control->get_chain_id()  );
+         push_transaction( trx );
+      }
+   }
+
    abi_serializer abi_ser;
    abi_serializer token_abi_ser;
 };
@@ -503,9 +538,6 @@ inline fc::mutable_variant_object voter( account_name acct ) {
       //("last_vote_weight", double(0))
       ("proxied_vote_weight", double(0))
       ("is_proxy", 0)
-      ("deferred_trx_id", 0)
-      ("last_unstake_time", fc::time_point_sec() )
-      ("unstaking", asset() )
       ;
 }
 

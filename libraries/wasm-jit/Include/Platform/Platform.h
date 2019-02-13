@@ -1,10 +1,10 @@
 #pragma once
 
-#include <assert.h>
 #include <vector>
 #include <functional>
 
 #include "Inline/BasicTypes.h"
+#include "Inline/Errors.h"
 
 #ifdef _WIN32
 	#define THREAD_LOCAL thread_local
@@ -134,6 +134,7 @@ namespace Platform
 		Uptr& outTrapOperand,
 		const std::function<void()>& thunk
 		);
+	PLATFORM_API void immediately_exit();
 
 	//
 	// Threading
@@ -167,7 +168,7 @@ namespace Platform
 
 		void detach()
 		{
-			assert(mutex);
+			WAVM_ASSERT_THROW(mutex);
 			mutex = nullptr;
 		}
 

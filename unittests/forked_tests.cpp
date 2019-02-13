@@ -21,6 +21,13 @@ public_key_type  get_public_key( name keyname, string role ){
    return get_private_key( keyname, role ).get_public_key();
 }
 
+void push_blocks( tester& from, tester& to ) {
+   while( to.control->fork_db_head_block_num() < from.control->fork_db_head_block_num() ) {
+      auto fb = from.control->fetch_block_by_number( to.control->fork_db_head_block_num()+1 );
+      to.push_block( fb );
+   }
+}
+
 BOOST_AUTO_TEST_SUITE(forked_tests)
 
 BOOST_AUTO_TEST_CASE( irrblock ) try {
@@ -37,6 +44,102 @@ BOOST_AUTO_TEST_CASE( irrblock ) try {
    c.produce_blocks(50);
 
 } FC_LOG_AND_RETHROW() 
+
+struct fork_tracker {
+   vector<signed_block_ptr> blocks;
+   incremental_merkle       block_merkle;
+};
+
+BOOST_AUTO_TEST_CASE( fork_with_bad_block ) try {
+   tester bios;
+   bios.produce_block();
+   bios.produce_block();
+   bios.create_accounts( {N(a),N(b),N(c),N(d),N(e)} );
+
+   bios.produce_block();
+   auto res = bios.set_producers( {N(a),N(b),N(c),N(d),N(e)} );
+
+   // run until the producers are installed and its the start of "a's" round
+   while( bios.control->pending_block_state()->header.producer.to_string() != "a" || bios.control->head_block_state()->header.producer.to_string() != "e") {
+      bios.produce_block();
+   }
+
+   // sync remote node
+   tester remote;
+   push_blocks(bios, remote);
+
+   // produce 6 blocks on bios
+   for (int i = 0; i < 6; i ++) {
+      bios.produce_block();
+      BOOST_REQUIRE_EQUAL( bios.control->head_block_state()->header.producer.to_string(), "a" );
+   }
+
+   vector<fork_tracker> forks(7);
+   // enough to skip A's blocks
+   auto offset = fc::milliseconds(config::block_interval_ms * 13);
+
+   // skip a's blocks on remote
+   // create 7 forks of 7 blocks so this fork is longer where the ith block is corrupted
+   for (size_t i = 0; i < 7; i ++) {
+      auto b = remote.produce_block(offset);
+      BOOST_REQUIRE_EQUAL( b->producer.to_string(), "b" );
+
+      for (size_t j = 0; j < 7; j ++) {
+         auto& fork = forks.at(j);
+
+         if (j <= i) {
+            auto copy_b = std::make_shared<signed_block>(b->clone());
+            if (j == i) {
+               // corrupt this block
+               fork.block_merkle = remote.control->head_block_state()->blockroot_merkle;
+               copy_b->action_mroot._hash[0] ^= 0x1ULL;
+            } else if (j < i) {
+               // link to a corrupted chain
+               copy_b->previous = fork.blocks.back()->id();
+            }
+
+            // re-sign the block
+            auto header_bmroot = digest_type::hash( std::make_pair( copy_b->digest(), fork.block_merkle.get_root() ) );
+            auto sig_digest = digest_type::hash( std::make_pair(header_bmroot, remote.control->head_block_state()->pending_schedule_hash) );
+            copy_b->producer_signature = remote.get_private_key(N(b), "active").sign(sig_digest);
+
+            // add this new block to our corrupted block merkle
+            fork.block_merkle.append(copy_b->id());
+            fork.blocks.emplace_back(copy_b);
+         } else {
+            fork.blocks.emplace_back(b);
+         }
+      }
+
+      offset = fc::milliseconds(config::block_interval_ms);
+   }
+
+   // go from most corrupted fork to least
+   for (size_t i = 0; i < forks.size(); i++) {
+      BOOST_TEST_CONTEXT("Testing Fork: " << i) {
+         const auto& fork = forks.at(i);
+         // push the fork to the original node
+         for (int fidx = 0; fidx < fork.blocks.size() - 1; fidx++) {
+            const auto& b = fork.blocks.at(fidx);
+            // push the block only if its not known already
+            if (!bios.control->fetch_block_by_id(b->id())) {
+               bios.push_block(b);
+            }
+         }
+
+         // push the block which should attempt the corrupted fork and fail
+         BOOST_REQUIRE_THROW(bios.push_block(fork.blocks.back()), fc::exception);
+      }
+   }
+
+   // make sure we can still produce a blocks until irreversibility moves
+   auto lib = bios.control->head_block_state()->dpos_irreversible_blocknum;
+   size_t tries = 0;
+   while (bios.control->head_block_state()->dpos_irreversible_blocknum == lib && ++tries < 10000) {
+      bios.produce_block();
+   }
+
+} FC_LOG_AND_RETHROW();
 
 BOOST_AUTO_TEST_CASE( forking ) try {
    tester c;
@@ -67,7 +170,7 @@ BOOST_AUTO_TEST_CASE( forking ) try {
 
    wdump((fc::json::to_pretty_string(cr)));
 
-   cr = c.push_action( N(eosio.token), N(issue), N(eosio), mutable_variant_object()
+   cr = c.push_action( N(eosio.token), N(issue), config::system_account_name, mutable_variant_object()
               ("to",       "dan" )
               ("quantity", core_from_string("100.0000"))
               ("memo", "")
@@ -78,10 +181,7 @@ BOOST_AUTO_TEST_CASE( forking ) try {
 
    tester c2;
    wlog( "push c1 blocks to c2" );
-   while( c2.control->head_block_num() < c.control->head_block_num() ) {
-      auto fb = c.control->fetch_block_by_number( c2.control->head_block_num()+1 );
-      c2.push_block( fb );
-   }
+   push_blocks(c, c2);
    wlog( "end push c1 blocks to c2" );
 
    wlog( "c1 blocks:" );
@@ -103,10 +203,7 @@ BOOST_AUTO_TEST_CASE( forking ) try {
 
    // Sync second chain with first chain.
    wlog( "push c1 blocks to c2" );
-   while( c2.control->head_block_num() < c.control->head_block_num() ) {
-      auto fb = c.control->fetch_block_by_number( c2.control->head_block_num()+1 );
-      c2.push_block( fb );
-   }
+   push_blocks(c, c2);
    wlog( "end push c1 blocks to c2" );
 
    // Now sam and pam go on their own fork while dan is producing blocks by himself.
@@ -150,10 +247,7 @@ BOOST_AUTO_TEST_CASE( forking ) try {
    c.produce_blocks(10);
 
    wlog( "push c1 blocks to c2" );
-   while( c2.control->head_block_num() < c.control->head_block_num() ) {
-      auto fb = c.control->fetch_block_by_number( c2.control->head_block_num()+1 );
-      c2.push_block( fb );
-   }
+   push_blocks(c, c2);
    wlog( "end push c1 blocks to c2" );
 
    // Now with four block producers active and two identical chains (for now),
@@ -183,10 +277,11 @@ BOOST_AUTO_TEST_CASE( forking ) try {
    }
    wlog( "end push c2 blocks to c1" );
    wlog( "now push dan's block to c1 but first corrupt it so it is a bad block" );
-   auto bad_block = *b;
+   signed_block bad_block = std::move(*b);
    bad_block.transaction_mroot = bad_block.previous;
+   auto bad_block_bs = c.control->create_block_state_future( std::make_shared<signed_block>(std::move(bad_block)) );
    c.control->abort_block();
-   BOOST_REQUIRE_EXCEPTION(c.control->push_block( std::make_shared<signed_block>(bad_block) ), fc::exception,
+   BOOST_REQUIRE_EXCEPTION(c.control->push_block( bad_block_bs ), fc::exception,
       [] (const fc::exception &ex)->bool {
          return ex.to_detail_string().find("block not signed by expected key") != std::string::npos;
       });
@@ -207,10 +302,7 @@ BOOST_AUTO_TEST_CASE( prune_remove_branch ) try {
 
    tester c2;
    wlog( "push c1 blocks to c2" );
-   while( c2.control->head_block_num() < c.control->head_block_num() ) {
-      auto fb = c.control->fetch_block_by_number( c2.control->head_block_num()+1 );
-      c2.push_block( fb );
-   }
+   push_blocks(c, c2);
 
    // fork happen after block 61
    BOOST_REQUIRE_EQUAL(61, c.control->head_block_num());
@@ -254,96 +346,31 @@ BOOST_AUTO_TEST_CASE( prune_remove_branch ) try {
 
 } FC_LOG_AND_RETHROW() 
 
-BOOST_AUTO_TEST_CASE(confirmation) try {
 
+BOOST_AUTO_TEST_CASE( read_modes ) try {
    tester c;
-   c.produce_blocks(10);
-   auto r = c.create_accounts( {N(dan),N(sam),N(pam),N(scott)} );
-   auto res = c.set_producers( {N(dan),N(sam),N(pam),N(scott)} );
+   c.produce_block();
+   c.produce_block();
+   auto r = c.create_accounts( {N(dan),N(sam),N(pam)} );
+   c.produce_block();
+   auto res = c.set_producers( {N(dan),N(sam),N(pam)} );
+   c.produce_blocks(200);
+   auto head_block_num = c.control->head_block_num();
 
-   private_key_type priv_sam = c.get_private_key( N(sam), "active" );
-   private_key_type priv_dan = c.get_private_key( N(dan), "active" );
-   private_key_type priv_pam = c.get_private_key( N(pam), "active" );
-   private_key_type priv_scott = c.get_private_key( N(scott), "active" );
-   private_key_type priv_invalid = c.get_private_key( N(invalid), "active" );
+   tester head(true, db_read_mode::HEAD);
+   push_blocks(c, head);
+   BOOST_REQUIRE_EQUAL(head_block_num, head.control->fork_db_head_block_num());
+   BOOST_REQUIRE_EQUAL(head_block_num, head.control->head_block_num());
 
-   wlog("set producer schedule to [dan,sam,pam,scott]");
-   c.produce_blocks(50);
-   c.control->abort_block(); // discard pending block
+   tester read_only(false, db_read_mode::READ_ONLY);
+   push_blocks(c, read_only);
+   BOOST_REQUIRE_EQUAL(head_block_num, read_only.control->fork_db_head_block_num());
+   BOOST_REQUIRE_EQUAL(head_block_num, read_only.control->head_block_num());
 
-   BOOST_REQUIRE_EQUAL(61, c.control->head_block_num());
-
-   // 55 is by dan
-   block_state_ptr blk = c.control->fork_db().get_block_in_current_chain_by_num(55);
-   block_state_ptr blk61 = c.control->fork_db().get_block_in_current_chain_by_num(61);
-   block_state_ptr blk50 = c.control->fork_db().get_block_in_current_chain_by_num(50);
-
-   BOOST_REQUIRE_EQUAL(0, blk->bft_irreversible_blocknum);
-   BOOST_REQUIRE_EQUAL(0, blk->confirmations.size());
-
-   // invalid signature
-   BOOST_REQUIRE_EXCEPTION(c.control->push_confirmation(header_confirmation{blk->id, N(sam), priv_invalid.sign(blk->sig_digest())}),
-      fc::exception,
-      [] (const fc::exception &ex)->bool {
-      return ex.to_detail_string().find("confirmation not signed by expected key") != std::string::npos;
-      });
-
-   // invalid schedule
-   BOOST_REQUIRE_EXCEPTION(c.control->push_confirmation(header_confirmation{blk->id, N(invalid), priv_invalid.sign(blk->sig_digest())}),
-      fc::exception,
-      [] (const fc::exception &ex)->bool {
-      return ex.to_detail_string().find("producer not in current schedule") != std::string::npos;
-      });
-
-   // signed by sam
-   c.control->push_confirmation(header_confirmation{blk->id, N(sam), priv_sam.sign(blk->sig_digest())});
-
-   BOOST_REQUIRE_EQUAL(0, blk->bft_irreversible_blocknum);
-   BOOST_REQUIRE_EQUAL(1, blk->confirmations.size());
-
-   // double confirm not allowed
-   BOOST_REQUIRE_EXCEPTION(c.control->push_confirmation(header_confirmation{blk->id, N(sam), priv_sam.sign(blk->sig_digest())}),
-      fc::exception,
-      [] (const fc::exception &ex)->bool {
-      return ex.to_detail_string().find("block already confirmed by this producer") != std::string::npos;
-      });
-
-   // signed by dan
-   c.control->push_confirmation(header_confirmation{blk->id, N(dan), priv_dan.sign(blk->sig_digest())});
-
-   BOOST_REQUIRE_EQUAL(0, blk->bft_irreversible_blocknum);
-   BOOST_REQUIRE_EQUAL(2, blk->confirmations.size());
-
-   // signed by pam
-   c.control->push_confirmation(header_confirmation{blk->id, N(pam), priv_pam.sign(blk->sig_digest())});
-
-   // we have more than 2/3 of confirmations, bft irreversible number should be set
-   BOOST_REQUIRE_EQUAL(55, blk->bft_irreversible_blocknum);
-   BOOST_REQUIRE_EQUAL(55, blk61->bft_irreversible_blocknum); // bft irreversible number will propagate to higher block
-   BOOST_REQUIRE_EQUAL(0, blk50->bft_irreversible_blocknum); // bft irreversible number will not propagate to lower block
-   BOOST_REQUIRE_EQUAL(3, blk->confirmations.size());
-
-   // signed by scott
-   c.control->push_confirmation(header_confirmation{blk->id, N(scott), priv_scott.sign(blk->sig_digest())});
-
-   BOOST_REQUIRE_EQUAL(55, blk->bft_irreversible_blocknum);
-   BOOST_REQUIRE_EQUAL(4, blk->confirmations.size());
-
-   // let's confirm block 50 as well
-   c.control->push_confirmation(header_confirmation{blk50->id, N(sam), priv_sam.sign(blk50->sig_digest())});
-   c.control->push_confirmation(header_confirmation{blk50->id, N(dan), priv_dan.sign(blk50->sig_digest())});
-   c.control->push_confirmation(header_confirmation{blk50->id, N(pam), priv_pam.sign(blk50->sig_digest())});
-   BOOST_REQUIRE_EQUAL(50, blk50->bft_irreversible_blocknum); // bft irreversible number will not propagate to lower block
-
-   block_state_ptr blk54 = c.control->fork_db().get_block_in_current_chain_by_num(54);
-   BOOST_REQUIRE_EQUAL(50, blk54->bft_irreversible_blocknum);
-   BOOST_REQUIRE_EQUAL(55, blk->bft_irreversible_blocknum); // bft irreversible number will not be updated to lower value
-   BOOST_REQUIRE_EQUAL(55, blk61->bft_irreversible_blocknum);
-
-   c.produce_blocks(20);
-
-   block_state_ptr blk81 = c.control->fork_db().get_block_in_current_chain_by_num(81);
-   BOOST_REQUIRE_EQUAL(55, blk81->bft_irreversible_blocknum); // bft irreversible number will propagate into new blocks
+   tester irreversible(true, db_read_mode::IRREVERSIBLE);
+   push_blocks(c, irreversible);
+   BOOST_REQUIRE_EQUAL(head_block_num, irreversible.control->fork_db_head_block_num());
+   BOOST_REQUIRE_EQUAL(head_block_num - 49, irreversible.control->head_block_num());
 
 } FC_LOG_AND_RETHROW()
 
